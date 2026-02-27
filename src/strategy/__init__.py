@@ -175,10 +175,10 @@ class SignalGenerator:
 
         # PAMRP
         df['pamrp'] = pamrp(df['high'], df['low'], df['close'], p.pamrp_length) \
-            if p.pamrp_enabled else 50.0
+            if (p.pamrp_enabled or p.pamrp_exit_enabled) else 50.0
 
         # BBWP
-        if p.bbwp_enabled:
+        if p.bbwp_enabled or p.bbwp_exit_enabled:
             df['bbwp']     = bbwp(df['close'], p.bbwp_length, p.bbwp_lookback)
             df['bbwp_sma'] = sma(df['bbwp'], p.bbwp_sma_length)
         else:
@@ -342,7 +342,7 @@ class SignalGenerator:
         exit_long  = pd.Series(False, index=df.index)
         exit_short = pd.Series(False, index=df.index)
 
-        if p.pamrp_exit_enabled and p.pamrp_enabled:
+        if p.pamrp_exit_enabled:
             exit_long  = exit_long  | (df['pamrp'] > p.pamrp_exit_long)
             exit_short = exit_short | (df['pamrp'] < p.pamrp_exit_short)
 
@@ -354,7 +354,7 @@ class SignalGenerator:
             exit_long  = exit_long  | (df['exit_ma_fast'] < df['exit_ma_slow'])
             exit_short = exit_short | (df['exit_ma_fast'] > df['exit_ma_slow'])
 
-        if p.bbwp_exit_enabled and p.bbwp_enabled:
+        if p.bbwp_exit_enabled and 'bbwp' in df.columns:
             exit_long  = exit_long  | (df['bbwp'] > p.bbwp_exit_threshold)
             exit_short = exit_short | (df['bbwp'] > p.bbwp_exit_threshold)
 

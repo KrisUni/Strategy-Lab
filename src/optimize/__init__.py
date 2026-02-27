@@ -507,11 +507,14 @@ class BayesianOptimizer:
         short_or_both = self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH]
 
         pe  = ef.get('pamrp_enabled', True)
-        pl  = p_int('pamrp_length',      10,  30) if pe else 21
-        pel = p_int('pamrp_entry_long',  10,  40) if pe and long_or_both  else 20
-        pxl = p_int('pamrp_exit_long',   55,  90) if pe and long_or_both  else 70
-        pes = p_int('pamrp_entry_short', 60,  90) if pe and short_or_both else 80
-        pxs = p_int('pamrp_exit_short',  10,  45) if pe and short_or_both else 30
+        pe  = ef.get('pamrp_enabled', False)
+        pl  = trial.suggest_int('pamrp_length', 10, 30) if (pe or ef.get('pamrp_exit_enabled', False)) else 21
+        pel = trial.suggest_int('pamrp_entry_long', 10, 40) if pe and self.trade_direction in [TradeDirection.LONG_ONLY, TradeDirection.BOTH] else 20
+        pes = trial.suggest_int('pamrp_entry_short', 60, 90) if pe and self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH] else 80
+
+        pxe = ef.get('pamrp_exit_enabled', False)
+        pxl = trial.suggest_int('pamrp_exit_long', 55, 90) if pxe and self.trade_direction in [TradeDirection.LONG_ONLY, TradeDirection.BOTH] else 70
+        pxs = trial.suggest_int('pamrp_exit_short', 10, 45) if pxe and self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH] else 30
 
         be   = ef.get('bbwp_enabled', True)
         bl   = p_int('bbwp_length',         8,   21) if be else 13
@@ -565,8 +568,7 @@ class BayesianOptimizer:
         ate = ef.get('atr_trailing_enabled', False)
         atl = p_int('atr_length',         10,  20) if ate else 14
         atm = p_float('atr_multiplier', 1.5, 4.0) if ate else 2.0
-
-        pxe = ef.get('pamrp_exit_enabled', True)
+   
         sre = ef.get('stoch_rsi_exit_enabled', False)
 
         txe = ef.get('time_exit_enabled', False)
