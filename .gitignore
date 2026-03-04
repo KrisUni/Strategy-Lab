@@ -1,0 +1,11 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+
+# Misc
+lol.txt
+
