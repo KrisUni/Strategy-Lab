@@ -12,7 +12,7 @@ import streamlit as st
 
 from src.strategy.atradeaday import run_atradeaday, ATradeADayParams
 from ui.charts import create_equity_chart, create_price_chart_with_trades
-
+from ui.charts import PLOTLY_CONFIG
 
 def render_atradeaday_tab() -> None:
 
@@ -150,11 +150,11 @@ def render_atradeaday_tab() -> None:
             c1.metric("Avg Bars Held", f"{r.avg_bars_held:.1f}")
             c2.metric("Longest DD",    f"{r.longest_drawdown_bars} bars")
 
-        st.plotly_chart(create_equity_chart(r), use_container_width=True)
+        st.plotly_chart(create_equity_chart(r), use_container_width=True, config=PLOTLY_CONFIG)
 
         st.plotly_chart(
             create_price_chart_with_trades(df, r.trades),
-            use_container_width=True,
+            use_container_width=True, config=PLOTLY_CONFIG,
         )
 
         with st.expander("📋 Trade Log", expanded=False):

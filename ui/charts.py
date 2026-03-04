@@ -22,6 +22,11 @@ from src.indicators import (
     rsi as compute_rsi,
 )
 
+# Shared Plotly renderer config — enables scroll-to-zoom on all charts
+PLOTLY_CONFIG = {
+    "scrollZoom": True,
+    "displayModeBar": True,
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared layout helper
