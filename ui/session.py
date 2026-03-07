@@ -58,6 +58,7 @@ def init_session_state() -> None:
         ('multi_df', {}),
         ('backtest_results', None),
         ('optimization_results', None),
+        ('atradeaday_results', None),
         ('capital', 10000),
         ('commission', 1.0),
         ('pinned_params', set()),

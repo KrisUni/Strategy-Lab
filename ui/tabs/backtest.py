@@ -14,7 +14,7 @@ from ui.charts import (
     create_price_chart_with_trades,
     create_rsi_divergence_chart,
 )
-
+from ui.charts import PLOTLY_CONFIG
 
 def render_backtest_tab() -> None:
     c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
@@ -68,7 +68,7 @@ def render_backtest_tab() -> None:
             c2.metric("Longest DD", f"{r.longest_drawdown_bars} bars")
             c3.metric("Avg MAE", f"{r.avg_mae:.2f}%")
             c4.metric("Avg MFE", f"{r.avg_mfe:.2f}%")
-        st.plotly_chart(create_equity_chart(r), use_container_width=True)
+        st.plotly_chart(create_equity_chart(r), use_container_width=True, config=PLOTLY_CONFIG)
 
     # ── Price chart (with optional HPDR overlay) ──────────────────────────────
     if st.session_state.df is not None:
@@ -89,7 +89,7 @@ def render_backtest_tab() -> None:
         trades_to_show = st.session_state.backtest_results.trades if st.session_state.backtest_results else None
         st.plotly_chart(
             create_price_chart_with_trades(df_chart, trades_to_show, bands=bands_data),
-            use_container_width=True,
+            use_container_width=True, config=PLOTLY_CONFIG,
         )
 
         # ── RSI Hidden Divergence sub-panel ───────────────────────────────────
@@ -107,7 +107,7 @@ def render_backtest_tab() -> None:
                     )
                     st.plotly_chart(
                         create_rsi_divergence_chart(df_chart, p),
-                        use_container_width=True,
+                        use_container_width=True, config=PLOTLY_CONFIG,
                     )
                 except Exception as e:
                     st.warning(f"RSI Divergence chart error: {e}")
