@@ -411,3 +411,342 @@ def run_monte_carlo(
         )
     else:
         raise ValueError(f"Unknown method: {method}. Use 'trade_shuffle', 'return_bootstrap', or 'noise_injection'.")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IN-SAMPLE PERMUTATION TEST
+# Add to: src/montecarlo/__init__.py
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Design:
+#   - Shuffle interior bars of the price series (rows 1 .. N-2)
+#   - Keep row[0] and row[-1] fixed → preserves overall trend/drift
+#   - Re-run the full strategy + backtest on each permuted series
+#   - Build null distribution of a chosen metric
+#   - p-value = fraction of permuted runs >= real strategy metric
+#
+# Why fix endpoints?
+#   The raw permutation destroys trend. A bearish market strategy would look
+#   great on a shuffled bull market just by luck. Anchoring first/last close
+#   keeps the same net price move (same "trend") while destroying all
+#   exploitable temporal structure in between.
+#
+# What this tests:
+#   H0: The strategy's edge is indistinguishable from random bar ordering.
+#   A low p-value (e.g. < 0.05) means the strategy is exploiting real
+#   temporal structure, not just riding the trend.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from dataclasses import dataclass, field
+from typing import Callable, Optional, List
+import numpy as np
+import pandas as pd
+
+
+@dataclass
+class PermutationTestResult:
+    """
+    Result of an in-sample permutation test.
+
+    Attributes
+    ----------
+    real_metric : float
+        Metric value on the actual (unshuffled) backtest.
+    null_distribution : np.ndarray
+        Metric values across all permuted runs.
+    p_value : float
+        Fraction of permuted runs that matched or exceeded real_metric.
+        Interpretation: p < 0.05 → strategy edge is statistically significant.
+    metric_name : str
+        Name of the metric used (e.g. 'profit_factor', 'sharpe', 'net_profit').
+    n_permutations : int
+        Number of permuted series tested.
+    pct_5 : float
+        5th percentile of null distribution.
+    pct_50 : float
+        Median of null distribution.
+    pct_95 : float
+        95th percentile of null distribution.
+    beat_pct : float
+        Percentage of null runs the real strategy outperformed (= 1 - p_value).
+    """
+    real_metric: float
+    null_distribution: np.ndarray
+    p_value: float
+    metric_name: str
+    n_permutations: int
+    pct_5: float
+    pct_50: float
+    pct_95: float
+    beat_pct: float
+
+
+def _permute_bars_fixed_endpoints(df: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+    """
+    Shuffle interior rows of an OHLCV dataframe while keeping the first
+    and last rows in place.
+
+    This preserves:
+      - The starting price (open of bar 0)
+      - The ending price (close of last bar)
+      - The overall net price change (trend / drift)
+
+    All OHLC relationships within each individual bar are intact because
+    whole rows are shuffled, not individual columns.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV dataframe indexed by datetime. Must have at least 3 rows.
+    rng : np.random.Generator
+        Seeded random generator for reproducibility.
+
+    Returns
+    -------
+    pd.DataFrame
+        Permuted dataframe with same index as original.
+    """
+    n = len(df)
+    if n < 3:
+        return df.copy()
+
+    # Indices of interior bars (everything except first and last)
+    interior_idx = np.arange(1, n - 1)
+    shuffled_interior = rng.permutation(interior_idx)
+
+    # Build new row order: first | shuffled interior | last
+    new_order = np.concatenate([[0], shuffled_interior, [n - 1]])
+
+    permuted = df.iloc[new_order].copy()
+    # Restore the original datetime index so indicators compute correctly
+    permuted.index = df.index
+    return permuted
+
+
+def _extract_metric(results, metric_name: str) -> float:
+    """
+    Pull a scalar metric from a BacktestResults object.
+
+    Supported metrics
+    -----------------
+    'profit_factor'  : gross_profit / gross_loss  (0 if no trades)
+    'sharpe'         : annualized Sharpe ratio
+    'net_profit'     : final equity - initial capital
+    'win_rate'       : fraction of winning trades
+    'calmar'         : CAGR / max_drawdown
+    'expectancy'     : mean P&L per trade
+    'total_return'   : percentage return on capital
+    """
+    if results is None or not results.trades:
+        return 0.0
+
+    m = metric_name.lower()
+
+    if m == 'profit_factor':
+        return getattr(results, 'profit_factor', 0.0) or 0.0
+
+    elif m == 'sharpe':
+        return getattr(results, 'sharpe_ratio', 0.0) or 0.0
+
+    elif m == 'net_profit':
+        ec = results.equity_curve
+        if ec is not None and len(ec) > 1:
+            return float(ec.iloc[-1] - ec.iloc[0])
+        return 0.0
+
+    elif m == 'win_rate':
+        return getattr(results, 'win_rate', 0.0) or 0.0
+
+    elif m == 'calmar':
+        cagr = getattr(results, 'cagr', 0.0) or 0.0
+        mdd  = abs(getattr(results, 'max_drawdown', 1.0) or 1.0)
+        return cagr / mdd if mdd > 0 else 0.0
+
+    elif m == 'expectancy':
+        trades = results.trades
+        if not trades:
+            return 0.0
+        return float(np.mean([t.pnl for t in trades]))
+
+    elif m == 'total_return':
+        ec = results.equity_curve
+        if ec is not None and len(ec) > 1 and ec.iloc[0] != 0:
+            return float((ec.iloc[-1] - ec.iloc[0]) / ec.iloc[0] * 100)
+        return 0.0
+
+    else:
+        raise ValueError(
+            f"Unknown metric '{metric_name}'. Choose from: "
+            "profit_factor, sharpe, net_profit, win_rate, calmar, expectancy, total_return"
+        )
+
+
+def in_sample_permutation_test(
+    df: pd.DataFrame,
+    run_backtest_fn: Callable,          # fn(df, params, **kwargs) -> BacktestResults
+    params,                              # StrategyParams or dict passed to run_backtest_fn
+    metric: str = 'profit_factor',
+    n_permutations: int = 500,
+    seed: int = 42,
+    real_results=None,                   # Pass pre-computed results to avoid re-running
+    **backtest_kwargs
+) -> PermutationTestResult:
+    """
+    In-sample permutation test with fixed endpoints.
+
+    Runs the strategy on N randomly permuted versions of the price series
+    (first and last bars anchored) to build a null distribution, then
+    computes a p-value for the real strategy's metric.
+
+    Mathematical definition
+    -----------------------
+        p = #{permuted_metric >= real_metric} / n_permutations
+
+        A p-value < 0.05 indicates the real strategy's performance is
+        unlikely to arise from random bar ordering → edge is real.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Full OHLCV dataframe used in the original backtest.
+    run_backtest_fn : Callable
+        Your existing backtest runner. Signature: fn(df, params, **kwargs)
+        Must return a BacktestResults object.
+    params : StrategyParams
+        Strategy parameters (same as used in the real backtest).
+    metric : str
+        Performance metric to test. Options:
+        'profit_factor' | 'sharpe' | 'net_profit' |
+        'win_rate' | 'calmar' | 'expectancy' | 'total_return'
+    n_permutations : int
+        Number of shuffled series to generate and test.
+        Recommended: 500 (fast) to 2000 (high precision p-value).
+    seed : int
+        Random seed for reproducibility.
+    real_results : BacktestResults, optional
+        Pre-computed backtest on the real data. If None, it will be run.
+    **backtest_kwargs
+        Any additional kwargs forwarded to run_backtest_fn.
+
+    Returns
+    -------
+    PermutationTestResult
+
+    Warnings
+    --------
+    - n_permutations * backtest_runtime = total wall time. For complex
+      strategies this can be slow. Start with n=200 to gauge speed.
+    - The test is in-sample: it does NOT validate out-of-sample performance.
+      Use walk-forward for that. This tests whether temporal structure matters
+      at all — a necessary but not sufficient condition for a real edge.
+    """
+    rng = np.random.default_rng(seed)
+
+    if len(df) < 3:
+        raise ValueError("Dataframe must have at least 3 rows for permutation test.")
+
+    # ── Real metric ──────────────────────────────────────────────────────────
+    if real_results is None:
+        real_results = run_backtest_fn(df, params, **backtest_kwargs)
+
+    real_metric_val = _extract_metric(real_results, metric)
+
+    # ── Null distribution ─────────────────────────────────────────────────────
+    null_metrics = np.empty(n_permutations)
+
+    for i in range(n_permutations):
+        permuted_df = _permute_bars_fixed_endpoints(df, rng)
+        try:
+            perm_results = run_backtest_fn(permuted_df, params, **backtest_kwargs)
+            null_metrics[i] = _extract_metric(perm_results, metric)
+        except Exception:
+            # If backtest fails on a permuted series (e.g. no trades), record 0
+            null_metrics[i] = 0.0
+
+    # ── p-value ───────────────────────────────────────────────────────────────
+    # One-tailed: how often does a random permutation match or beat the real run?
+    p_value = float(np.mean(null_metrics >= real_metric_val))
+
+    return PermutationTestResult(
+        real_metric=real_metric_val,
+        null_distribution=null_metrics,
+        p_value=p_value,
+        metric_name=metric,
+        n_permutations=n_permutations,
+        pct_5=float(np.percentile(null_metrics, 5)),
+        pct_50=float(np.percentile(null_metrics, 50)),
+        pct_95=float(np.percentile(null_metrics, 95)),
+        beat_pct=float((1 - p_value) * 100),
+    )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VISUALIZATION — add to your chart utilities
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_permutation_chart(result: PermutationTestResult):
+    """
+    Histogram of the null distribution with the real metric overlaid.
+
+    Visual interpretation:
+      - The histogram = what random bar ordering produces
+      - The red vertical line = your real strategy
+      - If the red line is far right → strong edge
+      - p-value shown in annotation
+    """
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # Null distribution histogram
+    fig.add_trace(go.Histogram(
+        x=result.null_distribution,
+        nbinsx=50,
+        name='Null Distribution (Permuted)',
+        marker_color='rgba(100, 149, 237, 0.6)',
+        marker_line=dict(color='rgba(100, 149, 237, 1.0)', width=0.5),
+    ))
+
+    # Real metric line
+    fig.add_vline(
+        x=result.real_metric,
+        line_color='#ef4444',
+        line_width=2.5,
+        annotation_text=f"Real: {result.real_metric:.3f}",
+        annotation_position="top right",
+        annotation_font_color='#ef4444',
+    )
+
+    # Median of null
+    fig.add_vline(
+        x=result.pct_50,
+        line_color='#94a3b8',
+        line_width=1.5,
+        line_dash='dash',
+        annotation_text=f"Null median: {result.pct_50:.3f}",
+        annotation_position="top left",
+        annotation_font_color='#94a3b8',
+    )
+
+    # Significance label
+    sig_label = "✅ Significant (p < 0.05)" if result.p_value < 0.05 else "⚠️ Not significant (p ≥ 0.05)"
+    sig_color = '#10b981' if result.p_value < 0.05 else '#f59e0b'
+
+    fig.update_layout(
+        title=dict(
+            text=f"Permutation Test — {result.metric_name.replace('_', ' ').title()}<br>"
+                 f"<span style='font-size:13px; color:{sig_color}'>"
+                 f"{sig_label} &nbsp;|&nbsp; p = {result.p_value:.4f} &nbsp;|&nbsp; "
+                 f"Beat {result.beat_pct:.1f}% of permutations</span>",
+            font_size=16,
+        ),
+        xaxis_title=result.metric_name.replace('_', ' ').title(),
+        yaxis_title='Count',
+        paper_bgcolor='#0a0e14',
+        plot_bgcolor='#11151c',
+        font_color='#e2e8f0',
+        showlegend=True,
+        bargap=0.05,
+        height=420,
+    )
+
+    return fig
+
