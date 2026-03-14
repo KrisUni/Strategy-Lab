@@ -45,7 +45,7 @@ All v7 fixes retained:
   - Efficiency ratio, param stability CV, failed trial %, warnings
   - Trial budget warnings
   - Exception counter
-  - study.best_trial canonical usage
+  - study.best_trial canonical usage.
 """
 
 import logging
@@ -506,15 +506,14 @@ class BayesianOptimizer:
         long_or_both  = self.trade_direction in [TradeDirection.LONG_ONLY,  TradeDirection.BOTH]
         short_or_both = self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH]
 
-        pe  = ef.get('pamrp_enabled', True)
         pe  = ef.get('pamrp_enabled', False)
-        pl  = trial.suggest_int('pamrp_length', 10, 30) if (pe or ef.get('pamrp_exit_enabled', False)) else 21
-        pel = trial.suggest_int('pamrp_entry_long', 10, 40) if pe and self.trade_direction in [TradeDirection.LONG_ONLY, TradeDirection.BOTH] else 20
-        pes = trial.suggest_int('pamrp_entry_short', 60, 90) if pe and self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH] else 80
+        pl  = p_int('pamrp_length', 10, 30) if (pe or ef.get('pamrp_exit_enabled', False)) else 21
+        pel = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
+        pes = p_int('pamrp_entry_short', 60, 90) if pe and short_or_both else 80
 
         pxe = ef.get('pamrp_exit_enabled', False)
-        pxl = trial.suggest_int('pamrp_exit_long', 55, 90) if pxe and self.trade_direction in [TradeDirection.LONG_ONLY, TradeDirection.BOTH] else 70
-        pxs = trial.suggest_int('pamrp_exit_short', 10, 45) if pxe and self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH] else 30
+        pxl = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
+        pxs = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
 
         be   = ef.get('bbwp_enabled', True)
         bl   = p_int('bbwp_length',         8,   21) if be else 13
