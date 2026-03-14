@@ -45,7 +45,7 @@ All v7 fixes retained:
   - Efficiency ratio, param stability CV, failed trial %, warnings
   - Trial budget warnings
   - Exception counter
-  - study.best_trial canonical usage
+  - study.best_trial canonical usage.
 """
 
 import logging
@@ -515,6 +515,7 @@ class BayesianOptimizer:
         pxe = ef.get('pamrp_exit_enabled', False)
         pxl = trial.suggest_int('pamrp_exit_long', 55, 90) if pxe and self.trade_direction in [TradeDirection.LONG_ONLY, TradeDirection.BOTH] else 70
         pxs = trial.suggest_int('pamrp_exit_short', 10, 45) if pxe and self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH] else 30
+
 
         be   = ef.get('bbwp_enabled', True)
         bl   = p_int('bbwp_length',         8,   21) if be else 13
