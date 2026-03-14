@@ -215,25 +215,49 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
         increasing_fillcolor='rgba(16,185,129,0.3)', decreasing_fillcolor='rgba(239,68,68,0.3)',
         name='Price'))
 
-    # ── Trade markers ─────────────────────────────────────────────────────────
+# ── Trade vertical lines ─────────────────────────────────────────────────
+    #   Entry: green (long) / red (short) — full-height vertical line
+    #   Exit:  orange — full-height vertical line
+    #   Same-bar entry+exit: both lines become dashed
     if trades:
-        ed = [t.entry_date for t in trades]
-        ep = [t.entry_price for t in trades]
-        ec = ['#10b981' if t.direction == 'long' else '#ef4444' for t in trades]
-        es = ['triangle-up' if t.direction == 'long' else 'triangle-down' for t in trades]
-        el = [f"{'▲ Long' if t.direction=='long' else '▼ Short'} @ ${t.entry_price:.2f}" for t in trades]
-        fig.add_trace(go.Scatter(x=ed, y=ep, mode='markers',
-            marker=dict(color=ec, size=9, symbol=es, line=dict(width=1, color='white')),
-            text=el, hoverinfo='text', name='Entries'))
-        xt = [t for t in trades if t.exit_date]
-        xd = [t.exit_date for t in xt]
-        xp = [t.exit_price for t in xt]
-        xc = ['#10b981' if t.pnl >= 0 else '#ef4444' for t in xt]
-        xl = [f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})" for t in xt]
-        fig.add_trace(go.Scatter(x=xd, y=xp, mode='markers',
-            marker=dict(color=xc, size=8, symbol='x', line=dict(width=1, color='white')),
-            text=xl, hoverinfo='text', name='Exits'))
+        same_bar_dates = set()
+        for t in trades:
+            if t.exit_date and t.entry_date == t.exit_date:
+                same_bar_dates.add(t.entry_date)
 
+        for t in trades:
+            is_same_bar = t.entry_date in same_bar_dates
+            dash_style = 'dash' if is_same_bar else 'solid'
+            entry_color = '#10b981' if t.direction == 'long' else '#ef4444'
+
+            # Entry line + label
+            fig.add_shape(
+                type='line', x0=t.entry_date, x1=t.entry_date,
+                y0=0, y1=1, yref='paper',
+                line=dict(color=entry_color, width=1, dash=dash_style),
+                opacity=0.7,
+            )
+            fig.add_annotation(
+                x=t.entry_date, y=1.0, yref='paper',
+                text=f"{'L' if t.direction == 'long' else 'S'} ${t.entry_price:.2f}",
+                showarrow=False, font=dict(size=8, color=entry_color),
+                xanchor='left', yanchor='bottom',
+            )
+
+            # Exit line + label
+            if t.exit_date:
+                fig.add_shape(
+                    type='line', x0=t.exit_date, x1=t.exit_date,
+                    y0=0, y1=1, yref='paper',
+                    line=dict(color='#f59e0b', width=1, dash=dash_style),
+                    opacity=0.7,
+                )
+                fig.add_annotation(
+                    x=t.exit_date, y=1.0, yref='paper',
+                    text=f"X ${t.exit_price:.2f}",
+                    showarrow=False, font=dict(size=8, color='#f59e0b'),
+                    xanchor='right', yanchor='bottom',
+                )
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
     price_min = float(df['low'].min())
     price_max = float(df['high'].max())
@@ -276,9 +300,11 @@ def create_rsi_divergence_chart(df: pd.DataFrame, p: dict) -> go.Figure:
     Signals are placed at the *confirmation* bar (pivot_right bars after the
     actual swing), not retroactively — zero look-ahead bias.
     """
-    rsi_series = compute_rsi(df['close'], p['rsi_div_length'])
+    length = p['rsi_div_length']
+    rsi_series = compute_rsi(df['close'], length)
     hidden_bull, hidden_bear = rsi_hidden_divergence(
-        df['close'], rsi_series,
+        df['close'], 
+        rsi_length=length,
         pivot_left=p['rsi_div_pivot_left'],
         pivot_right=p['rsi_div_pivot_right'],
         lookback_pivots=p.get('rsi_div_lookback_pivots', 3),
