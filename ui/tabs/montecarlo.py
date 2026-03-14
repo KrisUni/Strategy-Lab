@@ -61,22 +61,22 @@ def render_montecarlo_tab() -> None:
         c4.metric("95th Pctl", f"${mc.equity_percentiles['95%']:,.0f}")
 
         st.markdown("### 📈 Equity Confidence Bands")
-        st.plotly_chart(create_mc_confidence_chart(mc), use_container_width=True)
+        st.plotly_chart(create_mc_confidence_chart(mc), use_container_width=True,config=PLOTLY_CONFIG)
 
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("### 💰 Final Equity Distribution")
             st.plotly_chart(create_mc_histogram(mc.final_equities, xaxis_title='Final Equity $'),
-                            use_container_width=True)
+                            use_container_width=True,config=PLOTLY_CONFIG)
         with c2:
             st.markdown("### 📉 Max Drawdown Distribution")
             st.plotly_chart(create_mc_histogram(mc.max_drawdowns, xaxis_title='Max DD %'),
-                            use_container_width=True)
+                            use_container_width=True,config=PLOTLY_CONFIG)
 
         if mc.sharpe_distribution is not None:
             st.markdown("### 📊 Sharpe Ratio Distribution")
             st.plotly_chart(create_mc_histogram(mc.sharpe_distribution, xaxis_title='Sharpe'),
-                            use_container_width=True)
+                            use_container_width=True,config=PLOTLY_CONFIG)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("5th Pctl DD", f"{mc.dd_percentiles['5%']:.1f}%")
@@ -205,14 +205,14 @@ def _render_permutation_results(perm) -> None:
     st.markdown("#### Permutation Equity Curves")
     st.plotly_chart(
         _create_permutation_equity_chart(perm),
-        use_container_width=True,
+        use_container_width=True,config=PLOTLY_CONFIG,
     )
 
     # ── Metric distribution histogram ─────────────────────────────────────
     st.markdown(f"#### {perm.metric_name} Distribution")
     st.plotly_chart(
         _create_permutation_histogram(perm),
-        use_container_width=True,
+        use_container_width=True,config=PLOTLY_CONFIG,
     )
 
     # ── Extra stats ───────────────────────────────────────────────────────

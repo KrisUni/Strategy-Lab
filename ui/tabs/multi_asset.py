@@ -37,7 +37,7 @@ def render_multi_asset_tab() -> None:
                     st.warning(f"{sym}: {str(e)[:30]}")
 
         if results_dict:
-            st.plotly_chart(create_multi_asset_chart(results_dict), use_container_width=True)
+            st.plotly_chart(create_multi_asset_chart(results_dict), use_container_width=True,config=PLOTLY_CONFIG)
             st.dataframe(
                 pd.DataFrame([
                     {

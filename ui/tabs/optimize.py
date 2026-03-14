@@ -188,7 +188,7 @@ def _render_results() -> None:
         if res.stitched_equity is not None and len(res.stitched_equity) > 0:
             st.markdown("#### 📈 Stitched OOS Equity Curve")
             st.caption("Each segment is a genuine out-of-sample period — the only unbiased performance view for WFO.")
-            st.plotly_chart(create_stitched_equity_chart(res.stitched_equity), use_container_width=True)
+            st.plotly_chart(create_stitched_equity_chart(res.stitched_equity), use_container_width=True,config=PLOTLY_CONFIG)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -215,7 +215,7 @@ def _render_results() -> None:
         ]), use_container_width=True, hide_index=True)
 
     if not res.all_trials.empty:
-        st.plotly_chart(create_optimization_chart(res.all_trials, res.metric), use_container_width=True)
+        st.plotly_chart(create_optimization_chart(res.all_trials, res.metric), use_container_width=True,config=PLOTLY_CONFIG)
 
     st.button("📋 Apply Best Params", on_click=apply_best_params_callback, use_container_width=True)
     if st.session_state.pop('_apply_success', False):
