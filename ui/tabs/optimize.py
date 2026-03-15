@@ -13,7 +13,7 @@ from ui.helpers import get_active_filters_display, apply_best_params_callback
 from ui.charts import (
     create_walkforward_chart,
     create_stitched_equity_chart,
-    create_optimization_chart,
+    create_optimization_chart,PLOTLY_CONFIG
 )
 
 

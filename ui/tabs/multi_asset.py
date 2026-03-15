@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from src.backtest import BacktestEngine
 from src.data import fetch_yfinance
 from ui.helpers import params_to_strategy
-from ui.charts import create_multi_asset_chart
+from ui.charts import create_multi_asset_chart,PLOTLY_CONFIG
 
 
 def render_multi_asset_tab() -> None:

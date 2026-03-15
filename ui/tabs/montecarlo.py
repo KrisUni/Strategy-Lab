@@ -12,7 +12,7 @@ from src.montecarlo import run_monte_carlo
 from ui.charts import (
     create_mc_confidence_chart,
     create_mc_histogram,
-    _chart_layout,
+    _chart_layout,PLOTLY_CONFIG
 )
 
 
