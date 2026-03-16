@@ -7,6 +7,13 @@ calls stay in the tab modules.
 
 NOTE: create_heatmap lives in ui/tabs/heatmap.py because it depends on
       BacktestEngine and params_to_strategy, avoiding a circular import.
+
+CHANGES (TradingView-style interaction):
+  - _chart_layout() now sets dragmode='pan', crosshair spikes, hovermode
+  - PLOTLY_CONFIG / PLOTLY_CONFIG_STATIC exported for tab modules
+  - fixedrange=True removed from all time-series charts
+  - Range selector buttons added to price + equity charts
+  - Thin rangeslider on price chart for overview navigation
 """
 
 import numpy as np
@@ -24,10 +31,56 @@ from src.indicators import (
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Plotly config dicts — import and pass to every st.plotly_chart() call
+# ─────────────────────────────────────────────────────────────────────────────
+
+PLOTLY_CONFIG = {
+    'scrollZoom': True,                # scroll wheel = zoom
+    'displayModeBar': True,            # always show toolbar
+    'modeBarButtonsToAdd': [
+        'drawline', 'drawopenpath', 'eraseshape',
+    ],
+    'modeBarButtonsToRemove': [
+        'lasso2d', 'select2d', 'autoScale2d',
+    ],
+    'displaylogo': False,
+}
+
+# For small categorical charts (DOW, walkforward, heatmaps) where zoom is pointless
+PLOTLY_CONFIG_STATIC = {
+    'scrollZoom': False,
+    'displayModeBar': False,
+    'displaylogo': False,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Crosshair spike defaults
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SPIKE_DEFAULTS = dict(
+    spikemode='across',
+    spikethickness=0.5,
+    spikedash='solid',
+    spikecolor='#64748b',
+    spikesnap='cursor',
+    showspikes=True,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Shared layout helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _chart_layout(height: int = 280, **kwargs) -> dict:
+def _chart_layout(height: int = 280, crosshair: bool = False, **kwargs) -> dict:
+    """
+    Base Plotly layout with TradingView-style defaults.
+
+    Args:
+        height:    chart height in px
+        crosshair: if True, enable spike lines (crosshair) on x/y axes
+        **kwargs:  override any default (e.g. showlegend=True, hovermode='closest')
+    """
     defaults = dict(
         template='plotly_dark',
         paper_bgcolor='rgba(0,0,0,0)',
@@ -36,9 +89,48 @@ def _chart_layout(height: int = 280, **kwargs) -> dict:
         showlegend=False,
         margin=dict(l=50, r=20, t=10, b=30),
         font=dict(size=9),
+        # ── Interaction ──
+        dragmode='pan',             # drag = pan; shift+drag = zoom box
+        hovermode='closest',      # unified tooltip on time-series
     )
+
+    if crosshair:
+        defaults['xaxis'] = defaults.get('xaxis', {})
+        defaults['yaxis'] = defaults.get('yaxis', {})
+        defaults['xaxis'].update(**_SPIKE_DEFAULTS)
+        defaults['yaxis'].update(**_SPIKE_DEFAULTS)
+
     defaults.update(kwargs)
     return defaults
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Range selector presets (reusable)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RANGE_SELECTOR_STYLE = dict(
+    bgcolor='rgba(26,31,46,0.8)',
+    activecolor='#3b82f6',
+    bordercolor='#2d3548',
+    borderwidth=1,
+    font=dict(size=9, color='#e2e8f0'),
+)
+
+_RANGE_BUTTONS_FULL = [
+    dict(count=1, label='1M', step='month', stepmode='backward'),
+    dict(count=3, label='3M', step='month', stepmode='backward'),
+    dict(count=6, label='6M', step='month', stepmode='backward'),
+    dict(count=1, label='YTD', step='year', stepmode='todate'),
+    dict(count=1, label='1Y', step='year', stepmode='backward'),
+    dict(step='all', label='All'),
+]
+
+_RANGE_BUTTONS_SHORT = [
+    dict(count=3, label='3M', step='month', stepmode='backward'),
+    dict(count=6, label='6M', step='month', stepmode='backward'),
+    dict(count=1, label='1Y', step='year', stepmode='backward'),
+    dict(step='all', label='All'),
+]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,25 +215,75 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
         increasing_fillcolor='rgba(16,185,129,0.3)', decreasing_fillcolor='rgba(239,68,68,0.3)',
         name='Price'))
 
-    # ── Trade markers ─────────────────────────────────────────────────────────
+# ── Trade vertical lines (2 traces, not N shapes) ─────────────────────────
+    #   Draws all entries as one scatter trace, all exits as another,
+    #   using None-gap segments for vertical lines. This is O(1) traces
+    #   instead of O(N) shapes — massive rendering speedup for 50+ trades.
     if trades:
-        ed = [t.entry_date for t in trades]
-        ep = [t.entry_price for t in trades]
-        ec = ['#10b981' if t.direction == 'long' else '#ef4444' for t in trades]
-        es = ['triangle-up' if t.direction == 'long' else 'triangle-down' for t in trades]
-        el = [f"{'▲ Long' if t.direction=='long' else '▼ Short'} @ ${t.entry_price:.2f}" for t in trades]
-        fig.add_trace(go.Scatter(x=ed, y=ep, mode='markers',
-            marker=dict(color=ec, size=9, symbol=es, line=dict(width=1, color='white')),
-            text=el, hoverinfo='text', name='Entries'))
-        xt = [t for t in trades if t.exit_date]
-        xd = [t.exit_date for t in xt]
-        xp = [t.exit_price for t in xt]
-        xc = ['#10b981' if t.pnl >= 0 else '#ef4444' for t in xt]
-        xl = [f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})" for t in xt]
-        fig.add_trace(go.Scatter(x=xd, y=xp, mode='markers',
-            marker=dict(color=xc, size=8, symbol='x', line=dict(width=1, color='white')),
-            text=xl, hoverinfo='text', name='Exits'))
+        price_min = float(df['low'].min())
+        price_max = float(df['high'].max())
+        pad = (price_max - price_min) * 0.05
+        y_lo, y_hi = price_min - pad, price_max + pad
 
+        same_bar_dates = set()
+        for t in trades:
+            if t.exit_date and t.entry_date == t.exit_date:
+                same_bar_dates.add(t.entry_date)
+
+        # Build entry segments: for each trade, 2 points + None gap
+        entry_x, entry_y, entry_colors, entry_hover = [], [], [], []
+        exit_x, exit_y, exit_hover = [], [], []
+
+        for t in trades:
+            # Entry segment
+            entry_x.extend([t.entry_date, t.entry_date, None])
+            entry_y.extend([y_lo, y_hi, None])
+            c = '#10b981' if t.direction == 'long' else '#ef4444'
+            entry_colors.append(c)
+            label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
+            entry_hover.extend([label, label, None])
+
+            # Exit segment
+            if t.exit_date:
+                exit_x.extend([t.exit_date, t.exit_date, None])
+                exit_y.extend([y_lo, y_hi, None])
+                label = f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})"
+                exit_hover.extend([label, label, None])
+
+        # Split entries into long vs short traces (different colors)
+        long_x, long_y, long_h = [], [], []
+        short_x, short_y, short_h = [], [], []
+        for t in trades:
+            is_same = t.entry_date in same_bar_dates
+            dst_x = long_x if t.direction == 'long' else short_x
+            dst_y = long_y if t.direction == 'long' else short_y
+            dst_h = long_h if t.direction == 'long' else short_h
+            dst_x.extend([t.entry_date, t.entry_date, None])
+            dst_y.extend([y_lo, y_hi, None])
+            label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
+            dst_h.extend([label, label, None])
+
+        if long_x:
+            fig.add_trace(go.Scattergl(
+                x=long_x, y=long_y, mode='lines',
+                line=dict(color='rgba(16,185,129,0.5)', width=1),
+                text=long_h, hoverinfo='text',
+                name='Long Entries', showlegend=False,
+            ))
+        if short_x:
+            fig.add_trace(go.Scattergl(
+                x=short_x, y=short_y, mode='lines',
+                line=dict(color='rgba(239,68,68,0.5)', width=1),
+                text=short_h, hoverinfo='text',
+                name='Short Entries', showlegend=False,
+            ))
+        if exit_x:
+            fig.add_trace(go.Scattergl(
+                x=exit_x, y=exit_y, mode='lines',
+                line=dict(color='rgba(245,158,11,0.5)', width=1),
+                text=exit_hover, hoverinfo='text',
+                name='Exits', showlegend=False,
+            ))
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
     price_min = float(df['low'].min())
     price_max = float(df['high'].max())
@@ -150,9 +292,22 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
 
     show_legend = bands is not None
     fig.update_layout(
-        **_chart_layout(320, showlegend=show_legend,
+        **_chart_layout(400, showlegend=show_legend,
                         legend=dict(orientation='h', y=1.06, font=dict(size=8), traceorder='normal')),
-        xaxis_rangeslider_visible=False)
+        xaxis_rangeslider_visible=False,
+        xaxis_rangeslider=dict(
+            visible=False,
+            thickness=0.04,
+            bgcolor='rgba(10,14,20,0.5)',
+            bordercolor='#2d3548',
+            borderwidth=1,
+        ),
+        xaxis_rangeselector=dict(
+            buttons=_RANGE_BUTTONS_FULL,
+            x=0, y=1.06,
+            **_RANGE_SELECTOR_STYLE,
+        ),
+    )
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
     fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', range=y_range)
     return fig
@@ -171,46 +326,52 @@ def create_rsi_divergence_chart(df: pd.DataFrame, p: dict) -> go.Figure:
     Signals are placed at the *confirmation* bar (pivot_right bars after the
     actual swing), not retroactively — zero look-ahead bias.
     """
-    length = p.get('rsi_div_length', 14)
-    piv_left = p.get('rsi_div_pivot_left', 5)
-    piv_right = p.get('rsi_div_pivot_right', 5)
-
+    length = p['rsi_div_length']
     rsi_series = compute_rsi(df['close'], length)
-    bull, bear = rsi_hidden_divergence(df['close'], rsi_length=length,
-                                       pivot_left=piv_left, pivot_right=piv_right)
+    hidden_bull, hidden_bear = rsi_hidden_divergence(
+        df['close'], 
+        rsi_length=length,
+        pivot_left=p['rsi_div_pivot_left'],
+        pivot_right=p['rsi_div_pivot_right'],
+        lookback_pivots=p.get('rsi_div_lookback_pivots', 3),
+    )
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.06, row_heights=[0.65, 0.35])
+    bull = hidden_bull.values.astype(bool)
+    bear = hidden_bear.values.astype(bool)
+    bull_idx = df.index[bull]
+    bear_idx = df.index[bear]
 
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
+                        row_heights=[0.65, 0.35])
+
+    # Row 1 — price
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'],
         increasing_line_color='#10b981', decreasing_line_color='#ef4444',
         increasing_fillcolor='rgba(16,185,129,0.3)', decreasing_fillcolor='rgba(239,68,68,0.3)',
-        name='Price', showlegend=False), row=1, col=1)
+        name='Price', showlegend=True), row=1, col=1)
 
-    bull_idx = df.index[bull]
+    offset = (df['high'].max() - df['low'].min()) * 0.015
     if len(bull_idx) > 0:
-        fig.add_trace(go.Scatter(x=bull_idx, y=df['low'][bull] * 0.998,
-            mode='markers+text',
-            marker=dict(symbol='triangle-up', color='#10b981', size=11, line=dict(width=1, color='white')),
-            text=['HB'] * len(bull_idx), textposition='bottom center',
-            textfont=dict(size=7, color='#10b981'), name='Hidden Bull', showlegend=True,
-            hovertemplate='Hidden Bullish Div<br>%{x}<extra></extra>'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=bull_idx, y=df['low'][bull] - offset, mode='markers',
+            marker=dict(color='#10b981', size=10, symbol='triangle-up', line=dict(width=1, color='white')),
+            name='Hidden Bull', showlegend=True,
+            hovertemplate='Hidden Bull<br>%{x}<extra></extra>'), row=1, col=1)
 
-    bear_idx = df.index[bear]
     if len(bear_idx) > 0:
-        fig.add_trace(go.Scatter(x=bear_idx, y=df['high'][bear] * 1.002,
-            mode='markers+text',
-            marker=dict(symbol='triangle-down', color='#ef4444', size=11, line=dict(width=1, color='white')),
-            text=['HBr'] * len(bear_idx), textposition='top center',
-            textfont=dict(size=7, color='#ef4444'), name='Hidden Bear', showlegend=True,
-            hovertemplate='Hidden Bearish Div<br>%{x}<extra></extra>'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=bear_idx, y=df['high'][bear] + offset, mode='markers',
+            marker=dict(color='#ef4444', size=10, symbol='triangle-down', line=dict(width=1, color='white')),
+            name='Hidden Bear', showlegend=True,
+            hovertemplate='Hidden Bear<br>%{x}<extra></extra>'), row=1, col=1)
 
+    # Row 2 — RSI
     fig.add_trace(go.Scatter(x=df.index, y=rsi_series, mode='lines',
-        line=dict(color='#f59e0b', width=1.5), name='RSI', showlegend=False), row=2, col=1)
+        line=dict(color='#f59e0b', width=1.5), name='RSI', showlegend=True), row=2, col=1)
 
-    for level, color in [(70, 'rgba(239,68,68,0.4)'), (30, 'rgba(16,185,129,0.4)'), (50, 'rgba(100,116,139,0.3)')]:
-        fig.add_hline(y=level, line_dash='dot', line_color=color, line_width=1, row=2, col=1)
+    fig.add_hline(y=p.get('rsi_div_ob', 70), line_dash='dot', line_color='rgba(239,68,68,0.4)', row=2, col=1)
+    fig.add_hline(y=p.get('rsi_div_os', 30), line_dash='dot', line_color='rgba(16,185,129,0.4)', row=2, col=1)
+    fig.add_hrect(y0=p.get('rsi_div_os', 30), y1=p.get('rsi_div_ob', 70),
+                  fillcolor='rgba(100,116,139,0.05)', line_width=0, row=2, col=1)
 
     if len(bull_idx) > 0:
         fig.add_trace(go.Scatter(x=bull_idx, y=rsi_series[bull], mode='markers',
@@ -244,8 +405,10 @@ def create_equity_chart(results) -> go.Figure:
     peak = results.equity_curve.expanding().max()
     dd = (results.equity_curve - peak) / peak * 100
     fig.add_trace(go.Scatter(x=dd.index, y=dd.values, mode='lines', line=dict(color='#ef4444', width=2),
-        fill='tozeroy', fillcolor='rgba(239,68,68,0.15)'), row=2, col=1)
-    fig.update_layout(**_chart_layout(280, showlegend=True, legend=dict(orientation='h', y=1.12, font=dict(size=8))))
+        fill='tozeroy', fillcolor='rgba(239,68,68,0.15)', name='Drawdown %'), row=2, col=1)
+
+    fig.update_layout(**_chart_layout(340, showlegend=True, legend=dict(orientation='h', y=1.12, font=dict(size=8))))
+    fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
     fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
     return fig
@@ -263,7 +426,10 @@ def create_stitched_equity_chart(equity: pd.Series) -> go.Figure:
     fig.add_trace(go.Scatter(x=dd.index, y=dd.values, mode='lines',
         line=dict(color='#ef4444', width=2), fill='tozeroy',
         fillcolor='rgba(239,68,68,0.15)', name='Drawdown'), row=2, col=1)
+
     fig.update_layout(**_chart_layout(280, showlegend=True, legend=dict(orientation='h', y=1.12, font=dict(size=8))))
+    fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
+    
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
     fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
     return fig
@@ -274,16 +440,16 @@ def create_stitched_equity_chart(equity: pd.Series) -> go.Figure:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_walkforward_chart(wf_folds) -> go.Figure:
+    """Train vs OOS per fold. Categorical — no zoom needed."""
     if not wf_folds:
         return go.Figure()
     folds = [f"Fold {f.fold_num}" for f in wf_folds]
     fig = go.Figure()
     fig.add_trace(go.Bar(x=folds, y=[f.train_value for f in wf_folds], name='Train', marker_color='#3b82f6', opacity=0.8))
     fig.add_trace(go.Bar(x=folds, y=[f.test_value for f in wf_folds], name='OOS', marker_color='#10b981', opacity=0.8))
-    fig.update_layout(**_chart_layout(250, showlegend=True, barmode='group',
-                                      legend=dict(orientation='h', y=1.12), dragmode=False))
-    fig.update_xaxes(type='category', fixedrange=True, categoryorder='array', categoryarray=folds)
-    fig.update_yaxes(fixedrange=True)
+    fig.update_layout(**_chart_layout(250, crosshair=False, showlegend=True, barmode='group',
+                                      legend=dict(orientation='h', y=1.12), hovermode='closest'))
+    fig.update_xaxes(type='category', categoryorder='array', categoryarray=folds)
     return fig
 
 
@@ -292,10 +458,12 @@ def create_optimization_chart(trials_df: pd.DataFrame, metric: str) -> go.Figure
         return go.Figure()
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=trials_df['trial_number'], y=trials_df['value'], mode='markers',
-                             marker=dict(color='rgba(59,130,246,0.4)', size=5)))
+                             marker=dict(color='rgba(59,130,246,0.4)', size=5), name='Trial'))
     fig.add_trace(go.Scatter(x=trials_df['trial_number'], y=trials_df['value'].expanding().max(),
-                             mode='lines', line=dict(color='#10b981', width=2)))
-    fig.update_layout(**_chart_layout(200), xaxis_title="Trial", yaxis_title=metric)
+                             mode='lines', line=dict(color='#10b981', width=2), name='Best so far'))
+    fig.update_layout(**_chart_layout(220, showlegend=True,
+                      legend=dict(orientation='h', y=1.12, font=dict(size=8))),
+                      xaxis_title='Trial', yaxis_title=metric)
     return fig
 
 
@@ -311,7 +479,7 @@ def create_multi_asset_chart(results_dict: dict) -> go.Figure:
         fig.add_trace(go.Scatter(x=norm.index, y=norm.values, mode='lines',
                                  name=sym, line=dict(color=colors[i % len(colors)], width=2)))
     fig.update_layout(**_chart_layout(300, showlegend=True, legend=dict(orientation='h', y=1.1)),
-                      yaxis_title="Return %")
+                      yaxis_title='Return %')
     return fig
 
 
@@ -326,15 +494,15 @@ def create_mc_confidence_chart(mc: MonteCarloResult) -> go.Figure:
     if '5%' in mc.equity_bands and '95%' in mc.equity_bands:
         fig.add_trace(go.Scatter(x=x, y=mc.equity_bands['95%'], mode='lines', line=dict(width=0), showlegend=False))
         fig.add_trace(go.Scatter(x=x, y=mc.equity_bands['5%'], mode='lines', line=dict(width=0),
-                                 fill='tonexty', fillcolor='rgba(59,130,246,0.15)', name='5-95%'))
+                                 fill='tonexty', fillcolor='rgba(59,130,246,0.15)', name='5–95%'))
     if '25%' in mc.equity_bands and '75%' in mc.equity_bands:
         fig.add_trace(go.Scatter(x=x, y=mc.equity_bands['75%'], mode='lines', line=dict(width=0), showlegend=False))
         fig.add_trace(go.Scatter(x=x, y=mc.equity_bands['25%'], mode='lines', line=dict(width=0),
-                                 fill='tonexty', fillcolor='rgba(59,130,246,0.3)', name='25-75%'))
+                                 fill='tonexty', fillcolor='rgba(59,130,246,0.3)', name='25–75%'))
     if '50%' in mc.equity_bands:
         fig.add_trace(go.Scatter(x=x, y=mc.equity_bands['50%'], mode='lines',
                                  line=dict(color='#3b82f6', width=2), name='Median'))
-    fig.update_layout(**_chart_layout(250, showlegend=True, legend=dict(orientation='h', y=1.12, font=dict(size=8))))
+    fig.update_layout(**_chart_layout(280, showlegend=True, legend=dict(orientation='h', y=1.12, font=dict(size=8))))
     fig.update_xaxes(title_text='Step', gridcolor='rgba(45,53,72,0.3)')
     fig.update_yaxes(title_text='Equity $', gridcolor='rgba(45,53,72,0.3)')
     return fig
@@ -349,7 +517,7 @@ def create_mc_histogram(values, title: str = '', xaxis_title: str = '') -> go.Fi
     for val, label, color in [(p5, '5%', '#64748b'), (p50, '50%', '#f59e0b'), (p95, '95%', '#64748b')]:
         fig.add_vline(x=val, line_dash='dash', line_color=color,
                       annotation_text=f"{label}: {val:,.0f}" if abs(val) > 100 else f"{label}: {val:.1f}%")
-    fig.update_layout(**_chart_layout(220), xaxis_title=xaxis_title)
+    fig.update_layout(**_chart_layout(220, hovermode='closest'), xaxis_title=xaxis_title)
     return fig
 
 
@@ -358,6 +526,7 @@ def create_mc_histogram(values, title: str = '', xaxis_title: str = '') -> go.Fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_dow_chart(dow_df: pd.DataFrame) -> go.Figure:
+    """Day-of-week bar chart. Categorical — no zoom needed."""
     if dow_df.empty:
         return go.Figure()
     colors = ['#ef4444' if v < 0 else '#10b981' for v in dow_df['Avg %']]
@@ -369,13 +538,13 @@ def create_dow_chart(dow_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(x=dow_df['Day'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
         text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
     fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
-    fig.update_layout(**_chart_layout(380, showlegend=False), bargap=0.3)
-    fig.update_xaxes(type='category', fixedrange=True)
-    fig.update_yaxes(fixedrange=True)
+    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest'), bargap=0.3)
+    fig.update_xaxes(type='category')
     return fig
 
 
 def create_monthly_bar_chart(monthly_df: pd.DataFrame) -> go.Figure:
+    """Monthly seasonality bar chart. Categorical — no zoom needed."""
     if monthly_df.empty:
         return go.Figure()
     colors = ['#ef4444' if v < 0 else '#10b981' for v in monthly_df['Avg %']]
@@ -387,13 +556,13 @@ def create_monthly_bar_chart(monthly_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(x=monthly_df['Month'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
         text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
     fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
-    fig.update_layout(**_chart_layout(380, showlegend=False), bargap=0.3)
-    fig.update_xaxes(type='category', fixedrange=True)
-    fig.update_yaxes(fixedrange=True)
+    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest'), bargap=0.3)
+    fig.update_xaxes(type='category')
     return fig
 
 
 def create_monthly_heatmap(heatmap_df: pd.DataFrame) -> go.Figure:
+    """Year × Month heatmap. Fixed-range is appropriate here."""
     if heatmap_df.empty:
         return go.Figure()
     z = heatmap_df.values
@@ -404,11 +573,15 @@ def create_monthly_heatmap(heatmap_df: pd.DataFrame) -> go.Figure:
         y=[str(y) for y in heatmap_df.index], colorscale='RdYlGn', zmid=0,
         text=text, texttemplate='%{text}', showscale=True,
         colorbar=dict(title='Return %', thickness=12)))
-    fig.update_layout(**_chart_layout(max(250, len(heatmap_df) * 38 + 60)))
+    fig.update_layout(**_chart_layout(max(250, len(heatmap_df) * 38 + 60),
+                                      crosshair=False, hovermode='closest'))
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     return fig
 
 
 def create_dom_chart(dom_df: pd.DataFrame) -> go.Figure:
+    """Day-of-month chart. Categorical — no zoom needed."""
     if dom_df.empty:
         return go.Figure()
     colors = ['#ef4444' if v < 0 else '#10b981' for v in dom_df['Avg %']]
@@ -419,14 +592,16 @@ def create_dom_chart(dom_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(x=dom_df['Day of Month'], y=win_rates, mode='lines+markers',
         line=dict(color='#f59e0b', width=2), marker=dict(size=5), name='Win Rate %'), secondary_y=True)
     fig.add_hline(y=0, line_dash='dot', line_color='#64748b', secondary_y=False)
-    fig.update_layout(**_chart_layout(280, showlegend=True, legend=dict(orientation='h', y=1.1)))
-    fig.update_xaxes(title_text='Day of Month', dtick=1, fixedrange=True)
-    fig.update_yaxes(title_text='Avg Return %', fixedrange=True, secondary_y=False)
-    fig.update_yaxes(title_text='Win Rate %', fixedrange=True, secondary_y=True)
+    fig.update_layout(**_chart_layout(280, crosshair=False, showlegend=True,
+                                      legend=dict(orientation='h', y=1.1), hovermode='closest'))
+    fig.update_xaxes(title_text='Day of Month', dtick=1)
+    fig.update_yaxes(title_text='Avg Return %', secondary_y=False)
+    fig.update_yaxes(title_text='Win Rate %', secondary_y=True)
     return fig
 
 
 def create_hourly_chart(hourly_df: pd.DataFrame) -> go.Figure:
+    """Hourly returns bar chart. Categorical — no zoom needed."""
     if hourly_df is None or hourly_df.empty:
         return go.Figure()
     colors = ['#ef4444' if v < 0 else '#10b981' for v in hourly_df['Avg %']]
@@ -434,13 +609,13 @@ def create_hourly_chart(hourly_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(x=hourly_df['Hour'], y=hourly_df['Avg %'], marker_color=colors,
         text=[f"{v:+.4f}%" for v in hourly_df['Avg %']], textposition='outside'))
     fig.add_hline(y=0, line_dash='dot', line_color='#64748b')
-    fig.update_layout(**_chart_layout(260), bargap=0.2)
-    fig.update_xaxes(type='category', fixedrange=True)
-    fig.update_yaxes(fixedrange=True)
+    fig.update_layout(**_chart_layout(260, crosshair=False, hovermode='closest'), bargap=0.2)
+    fig.update_xaxes(type='category')
     return fig
 
 
 def create_return_distribution_chart(dist) -> go.Figure:
+    """Return distribution histogram."""
     if not dist.bins:
         return go.Figure()
     colors = ['#ef4444' if b < 0 else '#10b981' for b in dist.bins]
@@ -453,6 +628,6 @@ def create_return_distribution_chart(dist) -> go.Figure:
     ]:
         fig.add_vline(x=val, line_dash='dash', line_color=color,
                       annotation_text=label, annotation_position='top')
-    fig.update_layout(**_chart_layout(280, showlegend=False),
+    fig.update_layout(**_chart_layout(280, crosshair=False, showlegend=False, hovermode='closest'),
                       xaxis_title='Daily Return %', yaxis_title='Frequency')
     return fig
