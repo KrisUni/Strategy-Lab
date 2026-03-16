@@ -72,7 +72,7 @@ _SPIKE_DEFAULTS = dict(
 # Shared layout helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _chart_layout(height: int = 280, crosshair: bool = True, **kwargs) -> dict:
+def _chart_layout(height: int = 280, crosshair: bool = False, **kwargs) -> dict:
     """
     Base Plotly layout with TradingView-style defaults.
 
@@ -91,7 +91,7 @@ def _chart_layout(height: int = 280, crosshair: bool = True, **kwargs) -> dict:
         font=dict(size=9),
         # ── Interaction ──
         dragmode='pan',             # drag = pan; shift+drag = zoom box
-        hovermode='x unified',      # unified tooltip on time-series
+        hovermode='closest',      # unified tooltip on time-series
     )
 
     if crosshair:
@@ -215,49 +215,75 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
         increasing_fillcolor='rgba(16,185,129,0.3)', decreasing_fillcolor='rgba(239,68,68,0.3)',
         name='Price'))
 
-# ── Trade vertical lines ─────────────────────────────────────────────────
-    #   Entry: green (long) / red (short) — full-height vertical line
-    #   Exit:  orange — full-height vertical line
-    #   Same-bar entry+exit: both lines become dashed
+# ── Trade vertical lines (2 traces, not N shapes) ─────────────────────────
+    #   Draws all entries as one scatter trace, all exits as another,
+    #   using None-gap segments for vertical lines. This is O(1) traces
+    #   instead of O(N) shapes — massive rendering speedup for 50+ trades.
     if trades:
+        price_min = float(df['low'].min())
+        price_max = float(df['high'].max())
+        pad = (price_max - price_min) * 0.05
+        y_lo, y_hi = price_min - pad, price_max + pad
+
         same_bar_dates = set()
         for t in trades:
             if t.exit_date and t.entry_date == t.exit_date:
                 same_bar_dates.add(t.entry_date)
 
+        # Build entry segments: for each trade, 2 points + None gap
+        entry_x, entry_y, entry_colors, entry_hover = [], [], [], []
+        exit_x, exit_y, exit_hover = [], [], []
+
         for t in trades:
-            is_same_bar = t.entry_date in same_bar_dates
-            dash_style = 'dash' if is_same_bar else 'solid'
-            entry_color = '#10b981' if t.direction == 'long' else '#ef4444'
+            # Entry segment
+            entry_x.extend([t.entry_date, t.entry_date, None])
+            entry_y.extend([y_lo, y_hi, None])
+            c = '#10b981' if t.direction == 'long' else '#ef4444'
+            entry_colors.append(c)
+            label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
+            entry_hover.extend([label, label, None])
 
-            # Entry line + label
-            fig.add_shape(
-                type='line', x0=t.entry_date, x1=t.entry_date,
-                y0=0, y1=1, yref='paper',
-                line=dict(color=entry_color, width=1, dash=dash_style),
-                opacity=0.7,
-            )
-            fig.add_annotation(
-                x=t.entry_date, y=1.0, yref='paper',
-                text=f"{'L' if t.direction == 'long' else 'S'} ${t.entry_price:.2f}",
-                showarrow=False, font=dict(size=8, color=entry_color),
-                xanchor='left', yanchor='bottom',
-            )
-
-            # Exit line + label
+            # Exit segment
             if t.exit_date:
-                fig.add_shape(
-                    type='line', x0=t.exit_date, x1=t.exit_date,
-                    y0=0, y1=1, yref='paper',
-                    line=dict(color='#f59e0b', width=1, dash=dash_style),
-                    opacity=0.7,
-                )
-                fig.add_annotation(
-                    x=t.exit_date, y=1.0, yref='paper',
-                    text=f"X ${t.exit_price:.2f}",
-                    showarrow=False, font=dict(size=8, color='#f59e0b'),
-                    xanchor='right', yanchor='bottom',
-                )
+                exit_x.extend([t.exit_date, t.exit_date, None])
+                exit_y.extend([y_lo, y_hi, None])
+                label = f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})"
+                exit_hover.extend([label, label, None])
+
+        # Split entries into long vs short traces (different colors)
+        long_x, long_y, long_h = [], [], []
+        short_x, short_y, short_h = [], [], []
+        for t in trades:
+            is_same = t.entry_date in same_bar_dates
+            dst_x = long_x if t.direction == 'long' else short_x
+            dst_y = long_y if t.direction == 'long' else short_y
+            dst_h = long_h if t.direction == 'long' else short_h
+            dst_x.extend([t.entry_date, t.entry_date, None])
+            dst_y.extend([y_lo, y_hi, None])
+            label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
+            dst_h.extend([label, label, None])
+
+        if long_x:
+            fig.add_trace(go.Scattergl(
+                x=long_x, y=long_y, mode='lines',
+                line=dict(color='rgba(16,185,129,0.5)', width=1),
+                text=long_h, hoverinfo='text',
+                name='Long Entries', showlegend=False,
+            ))
+        if short_x:
+            fig.add_trace(go.Scattergl(
+                x=short_x, y=short_y, mode='lines',
+                line=dict(color='rgba(239,68,68,0.5)', width=1),
+                text=short_h, hoverinfo='text',
+                name='Short Entries', showlegend=False,
+            ))
+        if exit_x:
+            fig.add_trace(go.Scattergl(
+                x=exit_x, y=exit_y, mode='lines',
+                line=dict(color='rgba(245,158,11,0.5)', width=1),
+                text=exit_hover, hoverinfo='text',
+                name='Exits', showlegend=False,
+            ))
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
     price_min = float(df['low'].min())
     price_max = float(df['high'].max())
