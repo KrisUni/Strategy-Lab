@@ -268,9 +268,9 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
     fig.update_layout(
         **_chart_layout(400, showlegend=show_legend,
                         legend=dict(orientation='h', y=1.06, font=dict(size=8), traceorder='normal')),
-        xaxis_rangeslider_visible=True,
+        xaxis_rangeslider_visible=False,
         xaxis_rangeslider=dict(
-            visible=True,
+            visible=False,
             thickness=0.04,
             bgcolor='rgba(10,14,20,0.5)',
             bordercolor='#2d3548',
