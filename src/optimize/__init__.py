@@ -45,7 +45,7 @@ All v7 fixes retained:
   - Efficiency ratio, param stability CV, failed trial %, warnings
   - Trial budget warnings
   - Exception counter
-  - study.best_trial canonical usage
+  - study.best_trial canonical usage.
 """
 
 import logging
