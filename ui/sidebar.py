@@ -155,8 +155,7 @@ def _render_entry_indicators(p: dict) -> None:
             p['pamrp_length'] = st.slider("Length", 5, 50, p['pamrp_length'], key="pl")
             p['pamrp_entry_long'] = st.slider("Entry Long", 5, 50, p['pamrp_entry_long'], key="pel")
             p['pamrp_entry_short'] = st.slider("Entry Short", 50, 95, p['pamrp_entry_short'], key="pes")
-            p['pamrp_exit_long'] = st.slider("Exit Long", 50, 100, p['pamrp_exit_long'], key="pxl")
-            p['pamrp_exit_short'] = st.slider("Exit Short", 0, 50, p['pamrp_exit_short'], key="pxs")
+
 
     with st.expander("📊 BBWP", expanded=False):
         p['bbwp_enabled'] = st.toggle("Enable", p['bbwp_enabled'], key="be")
