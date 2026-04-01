@@ -24,7 +24,7 @@ from ui.tabs.montecarlo import render_montecarlo_tab
 from ui.tabs.calendar import render_calendar_tab
 from ui.tabs.heatmap import render_heatmap_tab
 from ui.tabs.multi_asset import render_multi_asset_tab
-from ui.tabs.trades import render_trades_tab
+
 
 # ── 1. Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -78,8 +78,6 @@ with tabs[5]:
 with tabs[6]:
     render_multi_asset_tab()
 
-with tabs[7]:
-    render_trades_tab()
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)

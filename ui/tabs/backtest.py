@@ -4,6 +4,8 @@ ui/tabs/backtest.py
 Renders the Backtest tab content (tabs[0]).
 """
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 
 from src.backtest import BacktestEngine
@@ -12,7 +14,7 @@ from ui.helpers import params_to_strategy
 from ui.charts import (
     create_equity_chart,
     create_price_chart_with_trades,
-    create_rsi_divergence_chart,PLOTLY_CONFIG
+    create_rsi_divergence_chart, PLOTLY_CONFIG
 )
 
 
@@ -39,6 +41,7 @@ def render_backtest_tab() -> None:
                 st.session_state.backtest_results = engine.run(st.session_state.df.copy())
                 st.success(f"✅ {st.session_state.backtest_results.num_trades} trades")
 
+    # ── Summary metrics ───────────────────────────────────────────────────
     if st.session_state.backtest_results:
         r = st.session_state.backtest_results
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -68,9 +71,8 @@ def render_backtest_tab() -> None:
             c2.metric("Longest DD", f"{r.longest_drawdown_bars} bars")
             c3.metric("Avg MAE", f"{r.avg_mae:.2f}%")
             c4.metric("Avg MFE", f"{r.avg_mfe:.2f}%")
-        st.plotly_chart(create_equity_chart(r), use_container_width=True,config=PLOTLY_CONFIG)
 
-    # ── Price chart (with optional HPDR overlay) ──────────────────────────────
+    # ── Price chart (with optional HPDR overlay) ──────────────────────────
     if st.session_state.df is not None:
         p = st.session_state.params
         df_chart = st.session_state.df
@@ -89,10 +91,17 @@ def render_backtest_tab() -> None:
         trades_to_show = st.session_state.backtest_results.trades if st.session_state.backtest_results else None
         st.plotly_chart(
             create_price_chart_with_trades(df_chart, trades_to_show, bands=bands_data),
-            use_container_width=True,config=PLOTLY_CONFIG
+            use_container_width=True, config=PLOTLY_CONFIG
         )
 
-        # ── RSI Hidden Divergence sub-panel ───────────────────────────────────
+    # ── Equity & drawdown curves ──────────────────────────────────────────
+    if st.session_state.backtest_results:
+        st.plotly_chart(create_equity_chart(r), use_container_width=True, config=PLOTLY_CONFIG)
+
+    # ── RSI Hidden Divergence sub-panel ───────────────────────────────────
+    if st.session_state.df is not None:
+        p = st.session_state.params
+        df_chart = st.session_state.df
         if p.get('rsi_div_enabled'):
             min_bars = 2 * (p['rsi_div_pivot_left'] + p['rsi_div_pivot_right'] + p['rsi_div_length'])
             if len(df_chart) < min_bars:
@@ -107,7 +116,58 @@ def render_backtest_tab() -> None:
                     )
                     st.plotly_chart(
                         create_rsi_divergence_chart(df_chart, p),
-                        use_container_width=True,config=PLOTLY_CONFIG
+                        use_container_width=True, config=PLOTLY_CONFIG
                     )
                 except Exception as e:
                     st.warning(f"RSI Divergence chart error: {e}")
+
+    # ── Trade log ─────────────────────────────────────────────────────────
+    _render_trade_log()
+
+
+def _render_trade_log() -> None:
+    """Inline trade log — previously the standalone Trades tab."""
+    if not (st.session_state.backtest_results and st.session_state.backtest_results.trades):
+        return
+
+    st.markdown("### 📋 Trade Log")
+    trades = st.session_state.backtest_results.trades
+
+    c1, c2 = st.columns(2)
+    dir_f = c1.selectbox("Dir", ["All", "Long", "Short"])
+    res_f = c2.selectbox("Result", ["All", "Winners", "Losers"])
+
+    flt = trades
+    if dir_f != "All":
+        flt = [t for t in flt if t.direction.lower() == dir_f.lower()]
+    if res_f == "Winners":
+        flt = [t for t in flt if t.pnl > 0]
+    elif res_f == "Losers":
+        flt = [t for t in flt if t.pnl <= 0]
+
+    if not flt:
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Trades", len(flt))
+    total_pnl = sum(t.pnl for t in flt)
+    c2.metric("Total PnL", f"${total_pnl:,.2f}")
+    c3.metric("Avg", f"${np.mean([t.pnl for t in flt]):.2f}")
+
+    trade_df = pd.DataFrame([{
+        'Entry': t.entry_date,
+        'Exit': t.exit_date,
+        'Dir': t.direction,
+        'Entry$': round(t.entry_price, 2),
+        'Exit$': round(t.exit_price, 2) if t.exit_price else None,
+        'Size$': round(t.size_dollars, 0),
+        'PnL$': round(t.pnl, 2),
+        'PnL%': round(t.pnl_pct, 3),
+        'Bars': t.bars_held,
+        'MAE%': round(t.mae, 2),
+        'MFE%': round(t.mfe, 2),
+        'Reason': t.exit_reason,
+    } for t in flt])
+
+    st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", use_container_width=True)
+    st.dataframe(trade_df, use_container_width=True, hide_index=True)
