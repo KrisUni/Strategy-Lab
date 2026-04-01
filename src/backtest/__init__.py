@@ -196,14 +196,20 @@ class BacktestEngine:
         """
         Close a position and compute final P&L.
 
-        Returns:
-            Tuple of (completed Trade, net P&L in dollars)
+        Slippage is applied only to exits that fill at a known price
+        (signal, time, end_of_data). Stop-type exits (SL, TP, trailing,
+        ATR trailing) already incorporate worst-case fill via
+        _gap_aware_fill() — applying percentage slippage on top would
+        double-penalize.
         """
-        # Apply slippage to exit
-        if position.direction == 'long':
-            exit_price *= (1 - self.slippage_pct / 100)
-        else:
-            exit_price *= (1 + self.slippage_pct / 100)
+        # Gap-aware exits already model adverse fill; don't add slippage
+        GAP_AWARE_EXITS = {'stop_loss', 'take_profit', 'trailing_stop', 'atr_trailing'}
+
+        if exit_reason not in GAP_AWARE_EXITS:
+            if position.direction == 'long':
+                exit_price *= (1 - self.slippage_pct / 100)
+            else:
+                exit_price *= (1 + self.slippage_pct / 100)
 
         # P&L calculation
         if position.direction == 'long':
