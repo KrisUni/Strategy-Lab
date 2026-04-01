@@ -54,7 +54,6 @@ tabs = st.tabs([
     "📅 Calendar",
     "🔥 Heatmap",
     "🌐 Multi-Asset",
-    "📋 Trades",
 ])
 
 with tabs[0]:
