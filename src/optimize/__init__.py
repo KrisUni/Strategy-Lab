@@ -88,7 +88,7 @@ def _suppress_warnings():
 
 # Entry-signal params — instability HERE means no reliable edge
 _ENTRY_PARAM_PREFIXES = (
-    'pamrp_length', 'pamrp_entry', 'pamrp_exit',
+    'pamrp_length', 'pamrp_entry',
     'bbwp_length', 'bbwp_lookback', 'bbwp_sma', 'bbwp_threshold', 'bbwp_ma',
     'adx_length', 'adx_smoothing', 'adx_threshold',
     'ma_fast_length', 'ma_slow_length', 'ma_type',
@@ -103,7 +103,7 @@ _EXIT_PARAM_PREFIXES = (
     'stop_loss_pct', 'take_profit_pct', 'trailing_stop_pct',
     'atr_length', 'atr_multiplier',
     'time_exit_bars', 'ma_exit_fast', 'ma_exit_slow',
-    'bbwp_exit_threshold',
+    'bbwp_exit_threshold','pamrp_exit',
 )
 
 

@@ -23,7 +23,8 @@ from ui.charts import (
 
 _PINNABLE = {
     'pamrp_enabled': [('pamrp_length', 'Length'), ('pamrp_entry_long', 'Entry Long'),
-        ('pamrp_entry_short', 'Entry Short'), ('pamrp_exit_long', 'Exit Long'), ('pamrp_exit_short', 'Exit Short')],
+        ('pamrp_entry_short', 'Entry Short')],
+    'pamrp_exit_enabled': [('pamrp_exit_long', 'Exit Long'), ('pamrp_exit_short', 'Exit Short')],
     'bbwp_enabled': [('bbwp_length', 'Length'), ('bbwp_lookback', 'Lookback'), ('bbwp_sma_length', 'SMA Length'),
         ('bbwp_ma_filter', 'MA Filter'), ('bbwp_threshold_long', 'Thresh Long'), ('bbwp_threshold_short', 'Thresh Short')],
     'adx_enabled': [('adx_length', 'Length'), ('adx_smoothing', 'Smoothing'), ('adx_threshold', 'Threshold')],
@@ -42,7 +43,8 @@ _PINNABLE = {
 }
 
 _INDICATOR_LABELS = {
-    'pamrp_enabled': 'PAMRP', 'bbwp_enabled': 'BBWP', 'adx_enabled': 'ADX',
+    'pamrp_enabled': 'PAMRP', 'pamrp_exit_enabled': 'PAMRP Exit',
+    'bbwp_enabled': 'BBWP', 'adx_enabled': 'ADX',
     'ma_trend_enabled': 'MA Trend', 'rsi_enabled': 'RSI', 'volume_enabled': 'Volume',
     'supertrend_enabled': 'Supertrend', 'macd_enabled': 'MACD',
     'stop_loss_enabled': 'Stop Loss', 'take_profit_enabled': 'Take Profit',
