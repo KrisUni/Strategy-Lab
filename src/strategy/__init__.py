@@ -356,7 +356,7 @@ class SignalGenerator:
 
         if p.bbwp_exit_enabled and 'bbwp' in df.columns:
             exit_long  = exit_long  | (df['bbwp'] > p.bbwp_exit_threshold)
-            exit_short = exit_short | (df['bbwp'] > p.bbwp_exit_threshold)
+            exit_short = exit_short | (df['bbwp'] < p.bbwp_exit_threshold)
 
         df['exit_long_signal']  = exit_long.fillna(False)
         df['exit_short_signal'] = exit_short.fillna(False)
