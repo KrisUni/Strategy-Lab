@@ -145,6 +145,4 @@ p < 0.05 → statistically significant edge.
 
 yfinance interval limits: 1m (7d), 5m (60d), 1h (730d), 1d+ (full history).
 
-## License
 
-MIT
