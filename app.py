@@ -81,6 +81,6 @@ with tabs[6]:
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 st.markdown(
-    '<p style="text-align:center;color:#64748b;font-size:0.7rem;">Strategy Lab v7.1</p>',
+    '<p style="text-align:center;color:#64748b;font-size:0.7rem;">Strategy Lab v1.0.0</p>',
     unsafe_allow_html=True,
 )

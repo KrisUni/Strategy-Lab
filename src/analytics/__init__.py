@@ -1,44 +1,6 @@
 """
-Calendar Analytics Module — v3
+Calendar Analytics Module — v1.0.0
 ===============================
-Fixes from v2 audit:
-
-- FIX #1: _resample_to_daily now applies daily resampling to ALL data,
-  not just intraday. Daily data passed raw had crypto/FX weekend gaps
-  counted as single-day returns. Now consistently uses resample('D').
-
-- FIX #2: compute_hourly_stats resamples to 1h before computing returns.
-  Previously used per-bar returns grouped by hour, which gave the average
-  5m/15m return per bar rather than the average hourly return. Only correct
-  for 1h bars; now correct for all intraday frequencies.
-
-- FIX #3: analyze_trade_calendar wraps entry_date in pd.Timestamp().
-  .dayofweek doesn't exist on plain Python datetime objects. Defensive
-  cast added; pnl_pct accessed via getattr with 0.0 fallback.
-
-- FIX #4: resample('ME') → _safe_month_resample() helper.
-  'ME' is only valid on pandas >= 2.2.0; requirements.txt allows 2.0+.
-  Helper tries 'ME', falls back to 'M' for older pandas versions.
-
-- FIX #5: compute_monthly_heatmap rebuilt with groupby/unstack.
-  Previous nested dict loop was O(n) but fragile to duplicates and
-  harder to reason about. Now one-liner vectorised groupby.
-
-- FIX #6: Empty DataFrame guards added to all compute_* functions.
-  Previously some paths would crash on empty input.
-
-Presentation improvements (v3):
-- DayOfWeekStats: added win_streak (max consecutive positive days)
-  and sharpe-like consistency score (mean/std) for ranking days.
-- MonthStats: added std_return_pct and total_return_pct.
-- CalendarAnalysis: added summary_stats dict (best/worst day, best/worst
-  month, overall win rate) for quick UI display.
-- All DataFrames returned with consistent column ordering and
-  formatted-ready float precision (rounded at source).
-- New: compute_return_distribution() — histogram bins for return
-  distribution display, resampled correctly for any frequency.
-- New: compute_consecutive_stats() — max win/loss streaks, useful
-  for risk-of-ruin context.
 """
 
 import logging

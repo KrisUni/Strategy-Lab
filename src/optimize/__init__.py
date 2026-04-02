@@ -1,51 +1,7 @@
 """
-Optimization Module - v8
+Optimization Module - v1.0.0
 ========================
-Fixes from v7 audit:
 
-- FIX #1: `full_data_results` replaces `best_results`.
-  Renamed to make unambiguous that this is an in-sample-contaminated
-  full-data run used only for UI display, NOT a performance estimate.
-  All callers (app.py) updated accordingly.
-
-- FIX #2: Efficiency ratio handles zero and negative IS correctly.
-  Previously silently returned 0.0 when avg_train <= 0.
-  Negative IS performance with positive OOS is a red flag of a
-  different kind and should be surfaced, not silenced.
-  Now uses abs(avg_train) > 1e-9 guard and allows negative ratio.
-
-- FIX #3: Parameter stability warning splits entry vs exit params.
-  Exit params (SL%, TP%, ATR mult, etc.) adapting between regimes is
-  EXPECTED behaviour — different volatility regimes require different
-  risk management. Flagging them as "unstable" was a false positive.
-  Now only entry-signal params are checked for stability.
-
-- FIX #4: `trials_per_fold` floor raised from 30 → 50.
-  TPE needs ~20 random warmup trials before making intelligent
-  suggestions. A floor of 30 with 10+ dimensions = random search.
-
-- FIX #5: `WalkForwardFold.oos_equity` replaces `oos_results`.
-  Storing full BacktestResults per fold (trades list + equity curve)
-  wastes significant memory on large datasets.
-  Only the equity curve is needed for stitching. `test_trades` count
-  is already stored separately on the fold.
-
-- FIX #6: Module-level `warnings.filterwarnings('ignore')` removed.
-  Previously suppressed ALL Python warnings globally on import.
-  Now scoped via context manager only around Optuna study.optimize().
-
-- FIX #7: `timeout` parameter restored to `optimize()`.
-  Was silently dropped from v7. Restored for direct BayesianOptimizer
-  users who rely on time-bounded runs.
-
-All v7 fixes retained:
-  - Rolling/anchored window choice
-  - OOS selection bias fix (last fold's params, not best OOS)
-  - Stitched OOS equity curve
-  - Efficiency ratio, param stability CV, failed trial %, warnings
-  - Trial budget warnings
-  - Exception counter
-  - study.best_trial canonical usage.
 """
 
 import logging

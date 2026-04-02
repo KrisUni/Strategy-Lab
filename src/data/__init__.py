@@ -1,54 +1,7 @@
 """
-Data Module - v2
+Data Module - v1.0.0
 ================
-Fixes from v1 audit:
 
-- FIX #1: Intraday data no longer silently ignores user start/end.
-  Previously used hardcoded periods ('7d', '60d', '730d') and discarded
-  the user's date range entirely. Now respects start/end where the API
-  allows, and clamps + warns clearly where yfinance has hard limits.
-
-- FIX #2: Fallback logic replaced.
-  The old fallback (try period first, then start/end on empty) was never
-  reached for the common case because yfinance returns empty silently.
-  Replaced with explicit limit-awareness and a clear error message that
-  states the actual API limit for the chosen interval.
-
-- FIX #3: Duplicate timestamps removed.
-  yfinance intraday fetches occasionally return duplicate index entries.
-  Now deduplicated (keep last) after fetch.
-
-- FIX #4: Index guaranteed sorted ascending.
-  yfinance does not guarantee sort order. Now explicit.
-
-- FIX #5: Timezone handling corrected.
-  Was using tz_localize(None) on a timezone-aware index, which raises
-  in newer pandas. Corrected to tz_convert('UTC').tz_localize(None).
-
-- FIX #6: auto_adjust and actions now explicit.
-  yfinance defaults may change between versions. Now always fetches
-  split/dividend-adjusted prices (correct for backtesting) and
-  suppresses the Dividends/Stock Splits columns at source.
-
-- FIX #7: Post-fetch data validation.
-  Checks for: positive prices, high >= low, high >= open/close,
-  low <= open/close. Raises ValueError with a clear message on failure.
-
-- FIX #8: generate_sample_data weekend filter fixed.
-  Dead-code first branch always fell through to the freq='B' fallback.
-  Simplified to use freq='B' directly. Now always returns exactly n bars.
-
-- FIX #9: generate_sample_data volume correlated with volatility.
-  Previous uniform random volume made volume-based indicators meaningless
-  on sample data. Volume now scales with daily return magnitude plus noise,
-  producing realistic volume-volatility correlation.
-
-- FIX #10: generate_sample_data start_date configurable.
-  Hardcoded '2020-01-01' replaced with a parameter. Defaults to a fixed
-  date for backward compatibility with existing tests.
-
-New utility:
-  validate_ohlcv(df) — standalone validation, usable from tests.
 """
 
 import logging

@@ -1,18 +1,6 @@
 """
-Backtest Module - v8
+Backtest Module - v1.0.0
 ====================
-Fixes from v7 audit:
-- CRITICAL #1: Gap-through fills — stop orders fill at open when open
-  gaps past the order level (not at the order level). Applies to SL,
-  TP, trailing stop, and ATR trailing. Matches NinjaTrader/Backtrader.
-- CRITICAL #2: Entry-bar SL/TP — stops are now checked on the entry
-  bar itself. If you enter at open and the bar's range hits your stop,
-  you get stopped out immediately (same bar).
-- HIGH #3: Time exit fills at open (was close — look-ahead bias).
-- HIGH #4: Kelly criterion uses realized trade statistics (rolling
-  avg win/loss %) after 20 trades, not theoretical SL/TP params.
-- All prior fixes retained (signal timing, SL/TP priority, active
-  Sharpe, end-of-data close, MTM equity, MAE/MFE).
 """
 
 import pandas as pd
