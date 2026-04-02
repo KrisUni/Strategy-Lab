@@ -538,7 +538,8 @@ def create_dow_chart(dow_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(x=dow_df['Day'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
         text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
     fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
-    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest'), bargap=0.3)
+    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)), bargap=0.3)
     fig.update_xaxes(type='category')
     return fig
 
@@ -556,7 +557,8 @@ def create_monthly_bar_chart(monthly_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(x=monthly_df['Month'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
         text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
     fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
-    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest'), bargap=0.3)
+    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)), bargap=0.3)
     fig.update_xaxes(type='category')
     return fig
 

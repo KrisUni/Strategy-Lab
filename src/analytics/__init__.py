@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-DAY_NAMES  = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+DAY_NAMES  = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 MONTH_NAMES = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
@@ -174,7 +174,7 @@ def compute_day_of_week_stats(
     stats_list: List[DayOfWeekStats] = []
     rows = []
 
-    for day_idx in range(5):
+    for day_idx in range(7):
         day_rets = returns[dow == day_idx]
         if len(day_rets) == 0:
             continue
@@ -574,7 +574,7 @@ def analyze_trade_calendar(trades: List) -> TradeCalendarAnalysis:
     tdf = pd.DataFrame(rows)
 
     day_rows = []
-    for d in range(5):
+    for d in range(7):
         sub = tdf[tdf['dow'] == d]
         if len(sub) == 0:
             continue
