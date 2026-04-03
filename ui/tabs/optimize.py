@@ -91,7 +91,7 @@ def render_optimize_tab() -> None:
     if active_display:
         st.caption(f"🔍 Active: **{', '.join(active_display)}**")
 
-    if st.button("🎯 Optimize", type="primary", use_container_width=True):
+    if st.button("🎯 Optimize", type="primary", width='stretch'):
         if st.session_state.df is None:
             st.warning("Load data first!")
         else:
@@ -186,11 +186,11 @@ def _render_results() -> None:
         st.markdown("#### Walk-Forward Fold Performance")
         st.caption(f"Window: **{res.window_type}** | Folds: **{len(res.walkforward_folds)}**")
         st.plotly_chart(create_walkforward_chart(res.walkforward_folds),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
         if res.stitched_equity is not None and len(res.stitched_equity) > 0:
             st.markdown("#### 📈 Stitched OOS Equity Curve")
             st.caption("Each segment is a genuine out-of-sample period — the only unbiased performance view for WFO.")
-            st.plotly_chart(create_stitched_equity_chart(res.stitched_equity), use_container_width=True,config=PLOTLY_CONFIG)
+            st.plotly_chart(create_stitched_equity_chart(res.stitched_equity), width='stretch',config=PLOTLY_CONFIG)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -201,7 +201,7 @@ def _render_results() -> None:
             if k.startswith('trade_direction') or isinstance(v, TradeDirection):
                 continue
             rows.append({"Parameter": f"{'🔒 ' if k in pp else ''}{k}", "Value": str(v)[:25]})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=280)
+        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True, height=280)
         if pp:
             st.caption(f"🔒 = fixed at sidebar value ({len(pp)} pinned)")
     with c2:
@@ -214,11 +214,11 @@ def _render_results() -> None:
             {"Metric": "Sharpe", "Value": f"{br.sharpe_ratio:.3f}"},
             {"Metric": "Max DD", "Value": f"{br.max_drawdown_pct:.2f}%"},
             {"Metric": "Trades", "Value": str(br.num_trades)},
-        ]), use_container_width=True, hide_index=True)
+        ]), width='stretch', hide_index=True)
 
     if not res.all_trials.empty:
-        st.plotly_chart(create_optimization_chart(res.all_trials, res.metric), use_container_width=True,config=PLOTLY_CONFIG)
+        st.plotly_chart(create_optimization_chart(res.all_trials, res.metric), width='stretch',config=PLOTLY_CONFIG)
 
-    st.button("📋 Apply Best Params", on_click=apply_best_params_callback, use_container_width=True)
+    st.button("📋 Apply Best Params", on_click=apply_best_params_callback, width='stretch')
     if st.session_state.pop('_apply_success', False):
         st.success(f"✅ Applied! Capital: ${st.session_state.capital:,.0f} | Commission: {st.session_state.commission}%")

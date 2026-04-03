@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from scipy import stats as _scipy_stats
 from typing import Dict, List, Optional
 
 from src.montecarlo import MonteCarloResult
@@ -789,4 +790,234 @@ def create_day_hour_heatmap(day_hour_df: pd.DataFrame) -> go.Figure:
                                       crosshair=False, hovermode='closest'))
     fig.update_xaxes(fixedrange=True)
     fig.update_yaxes(fixedrange=True)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Statistical distribution charts (p-value visualizations)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_group_boxplot(groups: dict, yaxis_title: str = 'Daily Return %') -> go.Figure:
+    """
+    Box plots of return distributions per group (DOW / monthly / quarterly).
+    groups: {label: [float values]}  — only groups with data are plotted.
+    Median > 0 → green box, median ≤ 0 → red box.
+    """
+    if not groups:
+        return go.Figure()
+    fig = go.Figure()
+    for label, values in groups.items():
+        if not values:
+            continue
+        median = float(np.median(values))
+        color = '#10b981' if median >= 0 else '#ef4444'
+        fill = 'rgba(16,185,129,0.2)' if median >= 0 else 'rgba(239,68,68,0.2)'
+        fig.add_trace(go.Box(
+            y=values, name=label,
+            marker_color=color,
+            line_color=color,
+            fillcolor=fill,
+            boxpoints='outliers',
+            pointpos=0,
+            marker_size=3,
+        ))
+    fig.add_hline(y=0, line_dash='dot', line_color='#64748b', line_width=0.8)
+    fig.update_layout(
+        **_chart_layout(300, crosshair=False, showlegend=False, hovermode='closest'),
+        yaxis_title=yaxis_title,
+    )
+    return fig
+
+
+def create_normal_fit_overlay(dist) -> go.Figure:
+    """
+    Return distribution histogram with a fitted normal curve overlay.
+    Visually shows what the Jarque-Bera test is testing:
+    how far the actual return shape deviates from the fitted normal bell curve.
+    """
+    if not dist.bins:
+        return go.Figure()
+    colors = ['#ef4444' if b < 0 else '#10b981' for b in dist.bins]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=dist.bins, y=dist.counts,
+        marker_color=colors, opacity=0.55, name='Returns',
+    ))
+    # Scale normal PDF to histogram (density × total × bin_width = count)
+    bin_width = dist.bins[1] - dist.bins[0] if len(dist.bins) > 1 else 0.1
+    total = sum(dist.counts)
+    x_range = np.linspace(min(dist.bins) - 2 * bin_width, max(dist.bins) + 2 * bin_width, 300)
+    y_normal = _scipy_stats.norm.pdf(x_range, dist.mean, dist.std) * total * bin_width
+    fig.add_trace(go.Scatter(
+        x=x_range, y=y_normal, mode='lines', name='Fitted normal',
+        line=dict(color='#f59e0b', width=2),
+    ))
+    verdict = 'non-normal (fat tails/skew)' if dist.jarque_bera_p < 0.05 else 'consistent with normal'
+    fig.add_annotation(
+        x=0.02, y=0.95, xref='paper', yref='paper',
+        text=f'JB stat={dist.jarque_bera_stat:.2f}  p={dist.jarque_bera_p:.4f} — {verdict}',
+        showarrow=False, font=dict(size=10, color='#f59e0b'),
+        bgcolor='rgba(0,0,0,0.55)', borderpad=4,
+    )
+    fig.update_layout(
+        **_chart_layout(280, crosshair=False, showlegend=True, hovermode='closest',
+                        legend=dict(orientation='h', y=1.12, font=dict(size=9))),
+        xaxis_title='Daily Return %', yaxis_title='Frequency',
+    )
+    return fig
+
+
+def create_qq_plot(returns: list) -> go.Figure:
+    """
+    Quantile-quantile plot comparing return quantiles against a fitted normal distribution.
+    Points on the diagonal red line → perfect normality.
+    S-curve or heavy tails → fat tails (excess kurtosis).
+    Curved slope → skewness.
+    """
+    if not returns or len(returns) < 10:
+        return go.Figure()
+    arr = np.array(returns, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    mu, sigma = float(arr.mean()), float(arr.std())
+    sorted_obs = np.sort(arr)
+    n = len(sorted_obs)
+    # Theoretical quantiles from fitted normal (Hazen plotting positions)
+    probs = (np.arange(1, n + 1) - 0.5) / n
+    theoretical = _scipy_stats.norm.ppf(probs, loc=mu, scale=sigma)
+    lo = min(theoretical[0], sorted_obs[0])
+    hi = max(theoretical[-1], sorted_obs[-1])
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=theoretical, y=sorted_obs.tolist(), mode='markers',
+        marker=dict(color='#3b82f6', size=3, opacity=0.6),
+        name='Return quantiles',
+    ))
+    fig.add_trace(go.Scatter(
+        x=[lo, hi], y=[lo, hi], mode='lines',
+        line=dict(color='#ef4444', dash='dash', width=1.5),
+        name='Normal reference',
+    ))
+    fig.update_layout(
+        **_chart_layout(260, crosshair=False, showlegend=True, hovermode='closest',
+                        legend=dict(orientation='h', y=1.12, font=dict(size=9))),
+        xaxis_title='Theoretical quantiles (fitted normal)',
+        yaxis_title='Observed return quantiles %',
+    )
+    return fig
+
+
+def create_chi2_distribution_chart(q_stat: float, df_dof: int, lb_p: float) -> go.Figure:
+    """
+    Chi-squared distribution PDF used internally by the Ljung-Box test.
+    The Q-statistic (computed from all autocorrelation lags) is compared against
+    this distribution to produce the p-value shown in the autocorrelation section.
+    Red shaded area = p-value (probability of Q this extreme if returns are truly IID).
+    """
+    chi2_95 = _scipy_stats.chi2.ppf(0.95, df=df_dof)
+    x_max = max(q_stat * 1.6, chi2_95 * 1.3, df_dof + 20.0)
+    x = np.linspace(0.01, x_max, 500)
+    y = _scipy_stats.chi2.pdf(x, df=df_dof)
+
+    fig = go.Figure()
+    # Shade p-value tail (area to the right of Q)
+    mask = x >= q_stat
+    if mask.any():
+        x_tail = np.concatenate([[x[mask][0]], x[mask]])
+        y_tail = np.concatenate([[0.0], y[mask]])
+        fig.add_trace(go.Scatter(
+            x=x_tail.tolist(), y=y_tail.tolist(), fill='tozeroy',
+            fillcolor='rgba(239,68,68,0.25)',
+            line=dict(color='rgba(0,0,0,0)'),
+            showlegend=False, hoverinfo='skip',
+        ))
+    # PDF line
+    fig.add_trace(go.Scatter(
+        x=x.tolist(), y=y.tolist(), mode='lines',
+        line=dict(color='#3b82f6', width=2),
+        name=f'χ²({df_dof}) distribution',
+    ))
+    # Q-stat vertical line
+    fig.add_vline(
+        x=q_stat, line_color='#ef4444', line_width=2,
+        annotation_text=f'Q = {q_stat:.2f}',
+        annotation_font_color='#ef4444',
+        annotation_position='top right',
+    )
+    # 5% significance threshold
+    fig.add_vline(
+        x=chi2_95, line_color='#f59e0b', line_width=1, line_dash='dash',
+        annotation_text=f'95th pctl ({chi2_95:.1f})',
+        annotation_font_color='#f59e0b',
+        annotation_position='top left',
+    )
+    fig.add_annotation(
+        x=0.02, y=0.95, xref='paper', yref='paper',
+        text=f'p = {lb_p:.4f}',
+        showarrow=False, font=dict(size=12, color='#ef4444'),
+        bgcolor='rgba(0,0,0,0.55)', borderpad=4,
+    )
+    fig.update_layout(
+        **_chart_layout(260, crosshair=False, showlegend=True, hovermode='closest',
+                        legend=dict(orientation='h', y=1.12, font=dict(size=9))),
+        xaxis_title='χ² statistic', yaxis_title='Probability density',
+    )
+    return fig
+
+
+def create_binomial_chart(wins: int, n: int) -> go.Figure:
+    """
+    Binomial PMF under the null hypothesis (H0: win rate = 50%, coin-flip market).
+    Grey bars = outcomes inside the 95% acceptance region.
+    Red bars = outcomes that would be statistically significant (p < 0.05).
+    Gold diamond = observed win count.
+    The two-sided p-value is the probability of observing a result at least this
+    extreme if the true win rate were exactly 50%.
+    """
+    if n <= 0:
+        return go.Figure()
+    mu = n / 2.0
+    sigma = (n * 0.25) ** 0.5
+    k_min = max(0, int(mu - 4.5 * sigma))
+    k_max = min(n, int(mu + 4.5 * sigma) + 1)
+    # Always include the observed value
+    k_min = min(k_min, max(0, wins - 3))
+    k_max = max(k_max, min(n, wins + 3))
+    k = np.arange(k_min, k_max + 1)
+    pmf = _scipy_stats.binom.pmf(k, n, 0.5)
+    ci_low = int(_scipy_stats.binom.ppf(0.025, n, 0.5))
+    ci_high = int(_scipy_stats.binom.ppf(0.975, n, 0.5))
+    # Two-sided p-value
+    if wins <= mu:
+        p_val = min(1.0, 2 * float(_scipy_stats.binom.cdf(wins, n, 0.5)))
+    else:
+        p_val = min(1.0, 2 * float(1 - _scipy_stats.binom.cdf(wins - 1, n, 0.5)))
+    colors = [
+        'rgba(239,68,68,0.5)' if (ki < ci_low or ki > ci_high) else 'rgba(100,116,139,0.5)'
+        for ki in k
+    ]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=k.tolist(), y=pmf.tolist(), marker_color=colors,
+        name='Binomial PMF (H₀: p=50%)',
+    ))
+    obs_y = float(_scipy_stats.binom.pmf(wins, n, 0.5))
+    fig.add_trace(go.Scatter(
+        x=[wins], y=[obs_y], mode='markers',
+        marker=dict(color='#f59e0b', size=13, symbol='diamond',
+                    line=dict(color='white', width=1)),
+        name=f'Observed: {wins}/{n} ({wins / n * 100:.1f}%)',
+    ))
+    verdict = ('significantly ≠ 50%' if p_val < 0.05 else 'not significantly different from 50%')
+    fig.add_annotation(
+        x=0.02, y=0.95, xref='paper', yref='paper',
+        text=f'p = {p_val:.4f} — {verdict}',
+        showarrow=False, font=dict(size=10, color='#f59e0b'),
+        bgcolor='rgba(0,0,0,0.55)', borderpad=4,
+    )
+    fig.update_layout(
+        **_chart_layout(240, crosshair=False, showlegend=True, hovermode='closest',
+                        legend=dict(orientation='h', y=1.12, font=dict(size=9))),
+        xaxis_title='Number of winning days', yaxis_title='Probability',
+        bargap=0.08,
+    )
     return fig

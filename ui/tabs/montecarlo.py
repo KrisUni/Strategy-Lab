@@ -36,7 +36,7 @@ def render_montecarlo_tab() -> None:
     if method_key == 'return_bootstrap':
         extra_kwargs['block_size'] = st.slider("Block Size", 1, 20, 5)
 
-    if st.button("🎲 Run Monte Carlo", use_container_width=True):
+    if st.button("🎲 Run Monte Carlo", width='stretch'):
         r = st.session_state.backtest_results
         if r and r.trades:
             with st.spinner(f"Running {n_sims} {mc_method} simulations..."):
@@ -61,22 +61,22 @@ def render_montecarlo_tab() -> None:
         c4.metric("95th Pctl", f"${mc.equity_percentiles['95%']:,.0f}")
 
         st.markdown("### 📈 Equity Confidence Bands")
-        st.plotly_chart(create_mc_confidence_chart(mc), use_container_width=True,config=PLOTLY_CONFIG)
+        st.plotly_chart(create_mc_confidence_chart(mc), width='stretch',config=PLOTLY_CONFIG)
 
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("### 💰 Final Equity Distribution")
             st.plotly_chart(create_mc_histogram(mc.final_equities, xaxis_title='Final Equity $'),
-                            use_container_width=True,config=PLOTLY_CONFIG)
+                            width='stretch',config=PLOTLY_CONFIG)
         with c2:
             st.markdown("### 📉 Max Drawdown Distribution")
             st.plotly_chart(create_mc_histogram(mc.max_drawdowns, xaxis_title='Max DD %'),
-                            use_container_width=True,config=PLOTLY_CONFIG)
+                            width='stretch',config=PLOTLY_CONFIG)
 
         if mc.sharpe_distribution is not None:
             st.markdown("### 📊 Sharpe Ratio Distribution")
             st.plotly_chart(create_mc_histogram(mc.sharpe_distribution, xaxis_title='Sharpe'),
-                            use_container_width=True,config=PLOTLY_CONFIG)
+                            width='stretch',config=PLOTLY_CONFIG)
 
         c1, c2, c3 = st.columns(3)
         c1.metric("5th Pctl DD", f"{mc.dd_percentiles['5%']:.1f}%")
@@ -110,7 +110,7 @@ def render_montecarlo_tab() -> None:
     perm_dir = c1.selectbox("Direction", ["long_only", "short_only", "both"], key="perm_dir")
     perm_min = c2.slider("Min Trades", 3, 20, 5, key="perm_min_trades")
 
-    if st.button("🧪 Run Permutation Test", use_container_width=True):
+    if st.button("🧪 Run Permutation Test", width='stretch'):
         if st.session_state.df is None:
             st.warning("Load data first!")
         else:
@@ -169,6 +169,23 @@ def render_montecarlo_tab() -> None:
 
 def _render_permutation_results(perm) -> None:
     """Render the full permutation test results section."""
+    with st.expander("📖 What this test is, what it measures, and why", expanded=False):
+        st.markdown(
+            f"""
+**Test used: Empirical permutation test (randomisation test)**
+
+| | |
+|---|---|
+| **Applied to** | The strategy's {perm.metric_name} score, optimised on the real price series |
+| **Null hypothesis (H₀)** | The strategy has no real edge — its performance is indistinguishable from what you'd get by optimising on randomly shuffled data |
+| **How it works** | 1. Optimise the strategy on the real price series → get **real {perm.metric_name} = {perm.real_metric:.3f}**. 2. Shuffle the price series {perm.n_permutations}× (destroying any genuine patterns) and re-optimise each time → build a distribution of {perm.metric_name} scores from noise alone. 3. Count what fraction of permuted scores ≥ real score → that fraction **is the p-value**. |
+| **Why this test** | Unlike parametric tests (t-test, F-test), this makes no assumptions about the return distribution. It directly answers: "could a curve-fitter find a score this good just by memorising noise?" This is the most honest overfitting test available for strategy development. |
+| **p-value = {perm.p_value:.3f}** | {perm.p_value * 100:.1f}% of permuted (noise) runs scored ≥ {perm.real_metric:.3f}. {'This is strong evidence of a real edge.' if perm.p_value < 0.05 else 'The real score is not exceptional compared to optimised noise — likely overfitting.'} |
+
+**Distribution chart below:** The histogram shows the {perm.metric_name} scores from all {perm.n_permutations} permutation runs. Each bar represents how often the noise-optimiser achieved that score. The red vertical line is your real strategy. The further right the red line sits relative to the cloud, the more confident you can be the edge is real.
+            """
+        )
+
     # Metrics row
     c1, c2, c3, c4 = st.columns(4)
     c1.metric(f"Real {perm.metric_name}", f"{perm.real_metric:.3f}")
@@ -205,14 +222,14 @@ def _render_permutation_results(perm) -> None:
     st.markdown("#### Permutation Equity Curves")
     st.plotly_chart(
         _create_permutation_equity_chart(perm),
-        use_container_width=True,config=PLOTLY_CONFIG,
+        width='stretch',config=PLOTLY_CONFIG,
     )
 
     # ── Metric distribution histogram ─────────────────────────────────────
     st.markdown(f"#### {perm.metric_name} Distribution")
     st.plotly_chart(
         _create_permutation_histogram(perm),
-        use_container_width=True,config=PLOTLY_CONFIG,
+        width='stretch',config=PLOTLY_CONFIG,
     )
 
     # ── Extra stats ───────────────────────────────────────────────────────

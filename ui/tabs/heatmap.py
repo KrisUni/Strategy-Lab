@@ -64,7 +64,7 @@ def render_heatmap_tab() -> None:
     p2 = c2.selectbox("Param Y", param_options, index=2)
     hm_metric = c3.selectbox("Metric", ["sharpe_ratio", "total_return_pct", "profit_factor"])
 
-    if st.button("🔥 Generate Heatmap", use_container_width=True):
+    if st.button("🔥 Generate Heatmap", width='stretch'):
         if st.session_state.df is not None:
             with st.spinner("Calculating..."):
                 st.plotly_chart(
@@ -74,7 +74,7 @@ def render_heatmap_tab() -> None:
                         st.session_state.capital,
                         st.session_state.commission,
                     ),
-                    use_container_width=True,
+                    width='stretch',
                 )
         else:
             st.warning("Load data first")

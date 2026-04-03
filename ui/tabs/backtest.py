@@ -25,7 +25,7 @@ def render_backtest_tab() -> None:
     slippage = c3.number_input("Slip %", 0.0, 0.5, 0.0, 0.01)
     with c4:
         st.markdown("<br>", unsafe_allow_html=True)
-        run = st.button("🚀 Run", type="primary", use_container_width=True)
+        run = st.button("🚀 Run", type="primary", width='stretch')
 
     if run:
         if st.session_state.df is None:
@@ -91,12 +91,12 @@ def render_backtest_tab() -> None:
         trades_to_show = st.session_state.backtest_results.trades if st.session_state.backtest_results else None
         st.plotly_chart(
             create_price_chart_with_trades(df_chart, trades_to_show, bands=bands_data),
-            use_container_width=True, config=PLOTLY_CONFIG
+            width='stretch', config=PLOTLY_CONFIG
         )
 
     # ── Equity & drawdown curves ──────────────────────────────────────────
     if st.session_state.backtest_results:
-        st.plotly_chart(create_equity_chart(r), use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(create_equity_chart(r), width='stretch', config=PLOTLY_CONFIG)
 
     # ── RSI Hidden Divergence sub-panel ───────────────────────────────────
     if st.session_state.df is not None:
@@ -116,7 +116,7 @@ def render_backtest_tab() -> None:
                     )
                     st.plotly_chart(
                         create_rsi_divergence_chart(df_chart, p),
-                        use_container_width=True, config=PLOTLY_CONFIG
+                        width='stretch', config=PLOTLY_CONFIG
                     )
                 except Exception as e:
                     st.warning(f"RSI Divergence chart error: {e}")
@@ -169,5 +169,5 @@ def _render_trade_log() -> None:
         'Reason': t.exit_reason,
     } for t in flt])
 
-    st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", use_container_width=True)
-    st.dataframe(trade_df, use_container_width=True, hide_index=True)
+    st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", width='stretch')
+    st.dataframe(trade_df, width='stretch', hide_index=True)

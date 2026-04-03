@@ -19,7 +19,7 @@ def render_multi_asset_tab() -> None:
 
     symbols_input = st.text_input("Symbols (comma-separated)", "SPY, QQQ, IWM")
 
-    if st.button("📊 Run Multi-Asset", use_container_width=True):
+    if st.button("📊 Run Multi-Asset", width='stretch'):
         symbols = [s.strip().upper() for s in symbols_input.split(',')]
         results_dict = {}
         with st.spinner(f"Testing {len(symbols)} assets..."):
@@ -37,7 +37,7 @@ def render_multi_asset_tab() -> None:
                     st.warning(f"{sym}: {str(e)[:30]}")
 
         if results_dict:
-            st.plotly_chart(create_multi_asset_chart(results_dict), use_container_width=True,config=PLOTLY_CONFIG)
+            st.plotly_chart(create_multi_asset_chart(results_dict), width='stretch',config=PLOTLY_CONFIG)
             st.dataframe(
                 pd.DataFrame([
                     {
@@ -50,6 +50,6 @@ def render_multi_asset_tab() -> None:
                     }
                     for s, r in results_dict.items()
                 ]),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )

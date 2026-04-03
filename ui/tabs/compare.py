@@ -17,7 +17,7 @@ def render_compare_tab() -> None:
         st.info("Load data first")
         return
 
-    if st.button("🔄 Compare", use_container_width=True):
+    if st.button("🔄 Compare", width='stretch'):
         df = st.session_state.df.copy()
         strat_res = BacktestEngine(
             params_to_strategy(st.session_state.params),
@@ -44,7 +44,7 @@ def render_compare_tab() -> None:
                     {'Strategy': '📈 B&H', 'Return %': f"{bh_pct:.2f}%",
                      'CAGR': '-', 'Max DD': f"{bh_dd:.2f}%", 'Sharpe': '-'},
                 ]),
-                use_container_width=True, hide_index=True,
+                width='stretch', hide_index=True,
             )
 
             diff = strat_res.total_return_pct - bh_pct

@@ -4,6 +4,7 @@ ui/tabs/calendar.py
 Renders the Calendar Analytics tab content (tabs[4]).
 """
 
+import numpy as np
 import streamlit as st
 
 from src.analytics import analyze_calendar, analyze_trade_calendar
@@ -19,7 +20,39 @@ from ui.charts import (
     create_rolling_dow_chart,
     create_autocorr_chart,
     create_day_hour_heatmap,
+    create_group_boxplot,
+    create_normal_fit_overlay,
+    create_qq_plot,
+    create_chi2_distribution_chart,
+    create_binomial_chart,
 )
+
+
+def _get_returns_for_charts(df):
+    """
+    Recompute daily close-to-close returns from raw OHLCV and group them
+    by day-of-week, month, and quarter for box-plot visualizations.
+    Returns (returns_list, dow_groups, month_groups, quarter_groups).
+    """
+    if df is None or df.empty or 'close' not in df.columns:
+        return [], {}, {}, {}
+    daily_close = df['close'].resample('D').last().dropna()
+    rets = daily_close.pct_change().dropna() * 100
+    if rets.empty:
+        return [], {}, {}, {}
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    dow = {name: rets[rets.index.dayofweek == i].tolist()
+           for i, name in enumerate(day_names)
+           if (rets.index.dayofweek == i).any()}
+    monthly = {month_names[m - 1]: rets[rets.index.month == m].tolist()
+               for m in range(1, 13)
+               if (rets.index.month == m).any()}
+    quarterly = {f'Q{q}': rets[rets.index.quarter == q].tolist()
+                 for q in range(1, 5)
+                 if (rets.index.quarter == q).any()}
+    return rets.tolist(), dow, monthly, quarterly
 
 
 def _sig_badge(p: float) -> str:
@@ -45,7 +78,7 @@ def render_calendar_tab() -> None:
         st.info("Load data first.")
         return
 
-    if st.button("📅 Analyze Calendar", use_container_width=True):
+    if st.button("📅 Analyze Calendar", width='stretch'):
         with st.spinner("Analyzing..."):
             cal = analyze_calendar(st.session_state.df)
             st.session_state._calendar = cal
@@ -56,6 +89,11 @@ def render_calendar_tab() -> None:
     cal = st.session_state.get('_calendar')
     if not cal:
         return
+
+    # Pre-compute grouped returns once — used by all distribution expanders below
+    _all_returns, _dow_groups, _month_groups, _quarter_groups = _get_returns_for_charts(
+        st.session_state.df
+    )
 
     tpy = cal.trading_days_per_year
     tpy_label = "365 days/yr — crypto/FX detected" if tpy == 365 else "252 days/yr — traditional markets"
@@ -82,6 +120,24 @@ def render_calendar_tab() -> None:
                   help="The calendar month with the highest average monthly return.")
         c5.metric("Ann. Return", f"{ss.get('annualized_return', 0):+.2f}%",
                   help=f"Mean daily return × {tpy} ({tpy_label}).")
+        with st.expander("📊 Show distribution — is the overall win rate a coin flip?", expanded=False):
+            st.markdown(
+                """
+**Test: Binomial test (two-sided)**
+- **What it tests:** Is the observed daily win rate significantly different from 50% (a fair coin)?
+- **Null hypothesis (H₀):** Each day closes up or down with equal probability — the market has no directional bias.
+- **Why this test:** Daily up/down outcomes are binary (win or loss), and the exact distribution under H₀ is the binomial distribution Bin(n, 0.5). No normality assumption is needed.
+- **How to read the chart:** Grey bars are within the 95% acceptance region. Red bars are in the rejection region. The gold diamond marks your observed win count. If the diamond lands on a red bar, the win rate is statistically significantly different from 50%.
+                """
+            )
+            _n_obs = ss.get('total_observations', 0)
+            _wr = ss.get('overall_win_rate', 50.0)
+            _wins = int(round(_wr / 100.0 * _n_obs))
+            if _n_obs > 0:
+                st.plotly_chart(
+                    create_binomial_chart(_wins, _n_obs),
+                    width='stretch', config={'displayModeBar': False},
+                )
         st.markdown("---")
 
     # ── Consecutive streaks ───────────────────────────────────────────────────
@@ -143,9 +199,27 @@ The p-value answers: *"If there were truly no day-of-week effect, how likely is 
         f"{'at least one day differs significantly from the others.' if kw_p < 0.05 else 'no significant difference between days overall — treat all patterns here with scepticism.'}"
     )
     st.plotly_chart(create_dow_chart(cal.day_of_week_df),
-                    use_container_width=True, config={'displayModeBar': False})
+                    width='stretch', config={'displayModeBar': False})
+    with st.expander("📊 Show distributions — what the tests are actually comparing", expanded=False):
+        st.markdown(
+            f"""
+**Tests used in this section:**
+
+| Test | Applied to | Null hypothesis | Why this test? |
+|------|-----------|----------------|----------------|
+| **One-sample t-test** | Mean return per day | H₀: mean = 0 (the day has no return edge) | The t-test is the standard test for "is this average different from zero?" It assumes returns within a day are roughly IID but is robust to mild non-normality with enough observations. |
+| **Kruskal-Wallis** | All 7 days together | H₀: all days have the same return distribution | Non-parametric alternative to one-way ANOVA. Chosen because daily returns are rarely normally distributed — Kruskal-Wallis makes no normality assumption. It asks whether *any* day differs from the others. Overall p = **{kw_p:.4f}**. |
+
+**Box plots below:** Each box shows the full distribution of daily returns for that day — median (middle line), interquartile range (box), 1.5×IQR whiskers, and outlier points. This is the underlying data that both the t-test and Kruskal-Wallis are comparing across days.
+            """
+        )
+        if _dow_groups:
+            st.plotly_chart(
+                create_group_boxplot(_dow_groups),
+                width='stretch', config={'displayModeBar': False},
+            )
     with st.expander("📋 Day-of-Week Table", expanded=False):
-        st.dataframe(cal.day_of_week_df, use_container_width=True, hide_index=True)
+        st.dataframe(cal.day_of_week_df, width='stretch', hide_index=True)
     st.markdown("---")
 
     # ── Monthly seasonality ───────────────────────────────────────────────────
@@ -170,7 +244,7 @@ For crypto these patterns are less established and tend to shift as the asset ma
             """
         )
     st.plotly_chart(create_monthly_bar_chart(cal.monthly_df),
-                    use_container_width=True, config={'displayModeBar': False})
+                    width='stretch', config={'displayModeBar': False})
     if not cal.monthly_heatmap.empty:
         st.markdown("**Year × Month Heatmap**")
         st.caption(
@@ -179,9 +253,25 @@ For crypto these patterns are less established and tend to shift as the asset ma
             "appears consistently in the same column across most years."
         )
         st.plotly_chart(create_monthly_heatmap(cal.monthly_heatmap),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
+    with st.expander("📊 Show distributions — what the monthly t-tests are comparing", expanded=False):
+        st.markdown(
+            """
+**Test used: One-sample t-test (per month)**
+- **Applied to:** The daily returns that fall within each calendar month (e.g., all days in January across all years).
+- **Null hypothesis (H₀):** The mean daily return in this month = 0 — no seasonal edge.
+- **Why the t-test:** We're asking "is the average return in January significantly different from zero?" The t-test answers this directly. It's applied independently to each month.
+- **Significance markers:** `**` = p < 0.01 (very strong), `*` = p < 0.05 (conventional threshold). Unmarked bars are likely noise.
+- **Box plots below:** The spread of daily returns in each month. A wide box in January means high variance — even if the mean is positive, the edge is noisy. A narrow box with the median well above zero is a cleaner signal.
+            """
+        )
+        if _month_groups:
+            st.plotly_chart(
+                create_group_boxplot(_month_groups),
+                width='stretch', config={'displayModeBar': False},
+            )
     with st.expander("📋 Monthly Table", expanded=False):
-        st.dataframe(cal.monthly_df, use_container_width=True, hide_index=True)
+        st.dataframe(cal.monthly_df, width='stretch', hide_index=True)
     st.markdown("---")
 
     # ── Quarterly seasonality ─────────────────────────────────────────────────
@@ -194,9 +284,24 @@ For crypto these patterns are less established and tend to shift as the asset ma
             "so the Sharpe and p-values here are based on individual days, not quarterly totals."
         )
         st.plotly_chart(create_quarterly_chart(cal.quarterly_df),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
+        with st.expander("📊 Show distributions — what the quarterly t-tests are comparing", expanded=False):
+            st.markdown(
+                """
+**Test used: One-sample t-test (per quarter)**
+- **Applied to:** All daily returns that fall within Q1 (Jan–Mar), Q2 (Apr–Jun), Q3 (Jul–Sep), or Q4 (Oct–Dec).
+- **Null hypothesis (H₀):** Mean daily return in this quarter = 0.
+- **Why the t-test:** Same reasoning as monthly — testing whether the average return in a seasonal block is non-zero. The t-statistic is `mean / (std / √n)`, so quarters with more observations get a tighter test.
+- **Box plots below:** The full distribution of daily returns per quarter. Comparing box positions (medians) across quarters reveals seasonal differences; comparing box sizes reveals whether one quarter is more volatile.
+                """
+            )
+            if _quarter_groups:
+                st.plotly_chart(
+                    create_group_boxplot(_quarter_groups),
+                    width='stretch', config={'displayModeBar': False},
+                )
         with st.expander("📋 Quarterly Table", expanded=False):
-            st.dataframe(cal.quarterly_df, use_container_width=True, hide_index=True)
+            st.dataframe(cal.quarterly_df, width='stretch', hide_index=True)
         st.markdown("---")
 
     # ── Year-by-year performance ──────────────────────────────────────────────
@@ -222,9 +327,9 @@ For crypto these patterns are less established and tend to shift as the asset ma
                 """
             )
         st.plotly_chart(create_yearly_chart(cal.yearly_df),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
         with st.expander("📋 Yearly Table", expanded=False):
-            st.dataframe(cal.yearly_df, use_container_width=True, hide_index=True)
+            st.dataframe(cal.yearly_df, width='stretch', hide_index=True)
         st.markdown("---")
 
     # ── DOW stability (year-over-year) ────────────────────────────────────────
@@ -253,9 +358,9 @@ This is why statistical significance alone isn't enough — a pattern can be sig
                 """
             )
         st.plotly_chart(create_rolling_dow_chart(cal.rolling_dow_df),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
         with st.expander("📋 Year × DOW Table", expanded=False):
-            st.dataframe(cal.rolling_dow_df, use_container_width=True)
+            st.dataframe(cal.rolling_dow_df, width='stretch')
         st.markdown("---")
 
     # ── Day-of-month ──────────────────────────────────────────────────────────
@@ -269,9 +374,9 @@ This is why statistical significance alone isn't enough — a pattern can be sig
             "Note: not every month has a 29th, 30th, or 31st, so sample sizes drop at month-end."
         )
         st.plotly_chart(create_dom_chart(cal.day_of_month_df),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
         with st.expander("📋 Day-of-Month Table", expanded=False):
-            st.dataframe(cal.day_of_month_df, use_container_width=True, hide_index=True)
+            st.dataframe(cal.day_of_month_df, width='stretch', hide_index=True)
         st.markdown("---")
 
     # ── Hourly (intraday only) ────────────────────────────────────────────────
@@ -284,9 +389,9 @@ This is why statistical significance alone isn't enough — a pattern can be sig
             "For crypto, these patterns reflect global handoff times between Asian, European, and US sessions."
         )
         st.plotly_chart(create_hourly_chart(cal.hourly_df),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
         with st.expander("📋 Hourly Table", expanded=False):
-            st.dataframe(cal.hourly_df, use_container_width=True, hide_index=True)
+            st.dataframe(cal.hourly_df, width='stretch', hide_index=True)
         st.markdown("---")
 
     # ── Day × Hour heatmap (intraday only) ────────────────────────────────────
@@ -299,7 +404,7 @@ This is why statistical significance alone isn't enough — a pattern can be sig
             "and avoid scheduling entries during consistently red cells."
         )
         st.plotly_chart(create_day_hour_heatmap(cal.day_hour_df),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
         st.markdown("---")
 
     # ── Return distribution ───────────────────────────────────────────────────
@@ -362,7 +467,33 @@ This is why statistical significance alone isn't enough — a pattern can be sig
                   help="p > 0.05: returns are consistent with a normal distribution. p < 0.05: fat tails or skew present — use CVaR and Sortino instead of VaR and Sharpe.")
 
         st.plotly_chart(create_return_distribution_chart(dist),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
+        with st.expander("📊 Show normal fit & QQ plot — Jarque-Bera test visualized", expanded=False):
+            st.markdown(
+                f"""
+**Test used: Jarque-Bera normality test**
+- **Applied to:** All daily returns in the full dataset.
+- **Null hypothesis (H₀):** Returns are drawn from a normal distribution (skewness = 0, excess kurtosis = 0).
+- **Test statistic:** JB = n/6 × (S² + K²/4), where S = skewness and K = excess kurtosis. JB = **{dist.jarque_bera_stat:.2f}**, p = **{dist.jarque_bera_p:.4f}**.
+- **Why it matters:** The Sharpe ratio and standard VaR both *assume* normally distributed returns. If JB rejects normality (p < 0.05), those measures understate tail risk — use CVaR and Sortino instead.
+- **Normal fit (left):** The orange curve is what a normal distribution with the same mean ({dist.mean:+.4f}%) and std ({dist.std:.4f}%) would look like. Excess counts in the tails beyond the orange curve = fat tails.
+- **QQ plot (right):** If returns were perfectly normal, all points would lie on the red diagonal. S-shaped deviation = fat tails (extreme gains AND losses more common than expected). One-sided bow = skewness.
+                """
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Histogram vs fitted normal**")
+                st.plotly_chart(
+                    create_normal_fit_overlay(dist),
+                    width='stretch', config={'displayModeBar': False},
+                )
+            with col2:
+                st.markdown("**QQ plot vs theoretical normal**")
+                if _all_returns:
+                    st.plotly_chart(
+                        create_qq_plot(_all_returns),
+                        width='stretch', config={'displayModeBar': False},
+                    )
         st.markdown("---")
 
     # ── Return autocorrelation ────────────────────────────────────────────────
@@ -401,7 +532,22 @@ This is why statistical significance alone isn't enough — a pattern can be sig
             f"{'significant autocorrelation detected: returns are not independent bar-to-bar.' if lb_p < 0.05 else 'no significant autocorrelation: returns appear independent (IID).'}"
         )
         st.plotly_chart(create_autocorr_chart(ac),
-                        use_container_width=True, config={'displayModeBar': False})
+                        width='stretch', config={'displayModeBar': False})
+        with st.expander("📊 Show Ljung-Box test distribution — how the p-value is computed", expanded=False):
+            st.markdown(
+                f"""
+**Test used: Ljung-Box portmanteau test**
+- **Applied to:** Return autocorrelations at lags 1 through {max(ac.lags)}.
+- **Null hypothesis (H₀):** Returns are independently and identically distributed (IID) — no autocorrelation at any lag.
+- **How it works:** The Ljung-Box Q-statistic combines all {len(ac.lags)} lag autocorrelations into one number: Q = n(n+2) × Σ(ρₖ² / (n−k)). Large Q means at least one lag has meaningful autocorrelation.
+- **Distribution under H₀:** Q follows a **chi-squared distribution** with {max(ac.lags)} degrees of freedom (one per lag tested). The p-value is the area to the right of Q under this curve — i.e., the probability of seeing Q this large if returns were truly random. Q = **{ac.ljung_box_stat:.2f}**, p = **{lb_p:.4f}**.
+- **Chart below:** The blue curve is the χ²({max(ac.lags)}) distribution. The red vertical line is your Q-statistic. The red shaded area is the p-value. If Q is in the right tail (past the gold dashed 95th percentile line), returns are not IID.
+                """
+            )
+            st.plotly_chart(
+                create_chi2_distribution_chart(ac.ljung_box_stat, max(ac.lags), lb_p),
+                width='stretch', config={'displayModeBar': False},
+            )
         st.markdown("---")
 
     # ── Trade calendar ────────────────────────────────────────────────────────
@@ -419,7 +565,7 @@ This is why statistical significance alone isn't enough — a pattern can be sig
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**By Entry Day of Week**")
-            st.dataframe(tc.trades_by_day, use_container_width=True, hide_index=True)
+            st.dataframe(tc.trades_by_day, width='stretch', hide_index=True)
         with c2:
             st.markdown("**By Entry Month**")
-            st.dataframe(tc.trades_by_month, use_container_width=True, hide_index=True)
+            st.dataframe(tc.trades_by_month, width='stretch', hide_index=True)

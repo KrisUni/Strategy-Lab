@@ -54,5 +54,5 @@ def render_trades_tab() -> None:
         'Reason': t.exit_reason,
     } for t in flt])
 
-    st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", use_container_width=True)
-    st.dataframe(trade_df, use_container_width=True, hide_index=True)
+    st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", width='stretch')
+    st.dataframe(trade_df, width='stretch', hide_index=True)

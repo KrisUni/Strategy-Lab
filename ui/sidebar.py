@@ -89,7 +89,7 @@ def _render_data_section() -> None:
         uploaded_file = st.file_uploader("Upload CSV", type=["csv"],
             help="Expected columns: date, open, high, low, close[, volume]. Date must be parseable as datetime.")
 
-    if st.button("📥 Load", use_container_width=True):
+    if st.button("📥 Load", width='stretch'):
         with st.spinner("Loading..."):
             try:
                 if data_src == "Yahoo Finance":
