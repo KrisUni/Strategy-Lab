@@ -526,37 +526,69 @@ def create_mc_histogram(values, title: str = '', xaxis_title: str = '') -> go.Fi
 # ─────────────────────────────────────────────────────────────────────────────
 
 def create_dow_chart(dow_df: pd.DataFrame) -> go.Figure:
-    """Day-of-week bar chart. Categorical — no zoom needed."""
+    """
+    Day-of-week bar chart with significance markers (* p<0.05, ** p<0.01)
+    and win rate error bars showing 95% Wilson CI.
+    """
     if dow_df.empty:
         return go.Figure()
     colors = ['#ef4444' if v < 0 else '#10b981' for v in dow_df['Avg %']]
     win_rates = [float(w.replace('%', '')) for w in dow_df['Win Rate']]
+    # Build bar labels: value + significance marker
+    has_sig = 'Sig' in dow_df.columns
+    bar_text = [
+        f"{v:+.4f}%{s}" for v, s in zip(
+            dow_df['Avg %'],
+            dow_df['Sig'] if has_sig else [''] * len(dow_df),
+        )
+    ]
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
-        row_heights=[0.65, 0.35], subplot_titles=['Average Daily Return %', 'Win Rate %'])
+        row_heights=[0.65, 0.35], subplot_titles=['Average Daily Return %  (* p<0.05  ** p<0.01)', 'Win Rate % with 95% CI'])
     fig.add_trace(go.Bar(x=dow_df['Day'], y=dow_df['Avg %'], marker_color=colors,
-        text=[f"{v:+.4f}%" for v in dow_df['Avg %']], textposition='outside', name='Avg Return'), row=1, col=1)
+        text=bar_text, textposition='outside', name='Avg Return'), row=1, col=1)
+    # Win rate bars with Wilson CI error bars
+    wr_error_minus = wr_error_plus = None
+    if 'WR CI Low' in dow_df.columns:
+        ci_lows  = [float(str(v).replace('%', '')) for v in dow_df['WR CI Low']]
+        ci_highs = [float(str(v).replace('%', '')) for v in dow_df['WR CI High']]
+        wr_error_minus = [wr - lo for wr, lo in zip(win_rates, ci_lows)]
+        wr_error_plus  = [hi - wr for wr, hi in zip(win_rates, ci_highs)]
+    error_y = dict(type='data', symmetric=False,
+                   array=wr_error_plus, arrayminus=wr_error_minus,
+                   color='#94a3b8', thickness=1.5, width=4) if wr_error_plus else None
     fig.add_trace(go.Bar(x=dow_df['Day'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
-        text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
+        text=[f"{w:.1f}%" for w in win_rates], textposition='outside',
+        error_y=error_y,
+        name='Win Rate'), row=2, col=1)
     fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
-    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest'), bargap=0.3)
+    fig.update_layout(**_chart_layout(400, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)), bargap=0.3)
     fig.update_xaxes(type='category')
     return fig
 
 
 def create_monthly_bar_chart(monthly_df: pd.DataFrame) -> go.Figure:
-    """Monthly seasonality bar chart. Categorical — no zoom needed."""
+    """Monthly seasonality bar chart with significance markers and win rate CIs."""
     if monthly_df.empty:
         return go.Figure()
     colors = ['#ef4444' if v < 0 else '#10b981' for v in monthly_df['Avg %']]
     win_rates = [float(w.replace('%', '')) for w in monthly_df['Win Rate']]
+    has_sig = 'Sig' in monthly_df.columns
+    bar_text = [
+        f"{v:+.2f}%{s}" for v, s in zip(
+            monthly_df['Avg %'],
+            monthly_df['Sig'] if has_sig else [''] * len(monthly_df),
+        )
+    ]
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
-        row_heights=[0.65, 0.35], subplot_titles=['Average Monthly Return %', 'Win Rate %'])
+        row_heights=[0.65, 0.35], subplot_titles=['Average Monthly Return %  (* p<0.05  ** p<0.01)', 'Win Rate % with 95% CI'])
     fig.add_trace(go.Bar(x=monthly_df['Month'], y=monthly_df['Avg %'], marker_color=colors,
-        text=[f"{v:+.2f}%" for v in monthly_df['Avg %']], textposition='outside', name='Avg Return'), row=1, col=1)
+        text=bar_text, textposition='outside', name='Avg Return'), row=1, col=1)
     fig.add_trace(go.Bar(x=monthly_df['Month'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
         text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
     fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
-    fig.update_layout(**_chart_layout(380, crosshair=False, showlegend=False, hovermode='closest'), bargap=0.3)
+    fig.update_layout(**_chart_layout(400, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)), bargap=0.3)
     fig.update_xaxes(type='category')
     return fig
 
@@ -615,19 +647,146 @@ def create_hourly_chart(hourly_df: pd.DataFrame) -> go.Figure:
 
 
 def create_return_distribution_chart(dist) -> go.Figure:
-    """Return distribution histogram."""
+    """Return distribution histogram with VaR lines."""
     if not dist.bins:
         return go.Figure()
     colors = ['#ef4444' if b < 0 else '#10b981' for b in dist.bins]
     fig = go.Figure()
     fig.add_trace(go.Bar(x=dist.bins, y=dist.counts, marker_color=colors, opacity=0.75, name='Frequency'))
-    for val, label, color in [
-        (dist.mean, f'Mean {dist.mean:+.3f}%', '#f59e0b'),
-        (dist.mean - dist.std, f'−1σ {dist.mean - dist.std:.3f}%', '#94a3b8'),
-        (dist.mean + dist.std, f'+1σ {dist.mean + dist.std:.3f}%', '#94a3b8'),
-    ]:
+    vlines = [
+        (dist.mean,             f'Mean {dist.mean:+.3f}%',                    '#f59e0b'),
+        (dist.mean - dist.std,  f'−1σ {dist.mean - dist.std:.3f}%',           '#94a3b8'),
+        (dist.mean + dist.std,  f'+1σ {dist.mean + dist.std:.3f}%',           '#94a3b8'),
+        (dist.var_95,           f'VaR 95% {dist.var_95:.3f}%',                '#ef4444'),
+        (dist.var_99,           f'VaR 99% {dist.var_99:.3f}%',                '#dc2626'),
+    ]
+    for val, label, color in vlines:
         fig.add_vline(x=val, line_dash='dash', line_color=color,
                       annotation_text=label, annotation_position='top')
-    fig.update_layout(**_chart_layout(280, crosshair=False, showlegend=False, hovermode='closest'),
+    fig.update_layout(**_chart_layout(300, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)),
                       xaxis_title='Daily Return %', yaxis_title='Frequency')
+    return fig
+
+
+def create_quarterly_chart(quarterly_df: pd.DataFrame) -> go.Figure:
+    """Q1–Q4 seasonality bar chart with win rate panel."""
+    if quarterly_df.empty:
+        return go.Figure()
+    colors = ['#ef4444' if v < 0 else '#10b981' for v in quarterly_df['Avg %']]
+    win_rates = [float(w.split('%')[0]) for w in quarterly_df['Win Rate']]
+    sig_text = [
+        f"{v:+.4f}%{s}" for v, s in zip(quarterly_df['Avg %'], quarterly_df['Sig'])
+    ]
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
+        row_heights=[0.65, 0.35], subplot_titles=['Average Daily Return % (by Quarter)', 'Win Rate %'])
+    fig.add_trace(go.Bar(x=quarterly_df['Quarter'], y=quarterly_df['Avg %'],
+        marker_color=colors, text=sig_text, textposition='outside', name='Avg Return'), row=1, col=1)
+    fig.add_trace(go.Bar(x=quarterly_df['Quarter'], y=win_rates, marker_color='#3b82f6', opacity=0.7,
+        text=[f"{w:.1f}%" for w in win_rates], textposition='outside', name='Win Rate'), row=2, col=1)
+    fig.add_hline(y=50, line_dash='dot', line_color='#64748b', row=2, col=1)
+    fig.update_layout(**_chart_layout(360, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)), bargap=0.3)
+    fig.update_xaxes(type='category')
+    return fig
+
+
+def create_yearly_chart(yearly_df: pd.DataFrame) -> go.Figure:
+    """Year-by-year total return bars with Sharpe overlay."""
+    if yearly_df.empty:
+        return go.Figure()
+    colors = ['#ef4444' if v < 0 else '#10b981' for v in yearly_df['Total Return %']]
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
+        row_heights=[0.6, 0.4], subplot_titles=['Annual Total Return %', 'Annualised Sharpe'])
+    fig.add_trace(go.Bar(
+        x=yearly_df['Year'].astype(str), y=yearly_df['Total Return %'],
+        marker_color=colors,
+        text=[f"{v:+.1f}%" for v in yearly_df['Total Return %']],
+        textposition='outside', name='Total Return'), row=1, col=1)
+    sharpe_colors = ['#ef4444' if v < 0 else '#10b981' for v in yearly_df['Sharpe (ann.)']]
+    fig.add_trace(go.Bar(
+        x=yearly_df['Year'].astype(str), y=yearly_df['Sharpe (ann.)'],
+        marker_color=sharpe_colors, opacity=0.8,
+        text=[f"{v:.2f}" for v in yearly_df['Sharpe (ann.)']],
+        textposition='outside', name='Sharpe'), row=2, col=1)
+    fig.add_hline(y=0, line_dash='dot', line_color='#64748b', row=1, col=1)
+    fig.add_hline(y=0, line_dash='dot', line_color='#64748b', row=2, col=1)
+    fig.update_layout(**_chart_layout(400, crosshair=False, showlegend=False, hovermode='closest',
+                                      margin=dict(l=50, r=20, t=40, b=30)), bargap=0.2)
+    fig.update_xaxes(type='category')
+    return fig
+
+
+def create_rolling_dow_chart(rolling_dow_df: pd.DataFrame) -> go.Figure:
+    """
+    Year-over-year DOW mean return — one line per day.
+    A flat or reversing line = edge is unreliable.
+    """
+    if rolling_dow_df.empty:
+        return go.Figure()
+    palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4']
+    fig = go.Figure()
+    for i, col in enumerate(rolling_dow_df.columns):
+        series = rolling_dow_df[col].dropna()
+        if series.empty:
+            continue
+        color = palette[i % len(palette)]
+        fig.add_trace(go.Scatter(
+            x=series.index.astype(str), y=series.values,
+            mode='lines+markers', name=col,
+            line=dict(color=color, width=2),
+            marker=dict(size=5, color=color),
+        ))
+    fig.add_hline(y=0, line_dash='dot', line_color='#64748b')
+    fig.update_layout(**_chart_layout(300, crosshair=False, showlegend=True,
+                                      legend=dict(orientation='h', y=1.12),
+                                      hovermode='closest'),
+                      xaxis_title='Year', yaxis_title='Avg Daily Return %')
+    return fig
+
+
+def create_autocorr_chart(autocorr) -> go.Figure:
+    """ACF bar chart with 95% confidence band."""
+    if not autocorr.lags:
+        return go.Figure()
+    colors = ['#ef4444' if abs(v) > abs(autocorr.conf_upper) else '#3b82f6'
+              for v in autocorr.acf_values]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=autocorr.lags, y=autocorr.acf_values,
+        marker_color=colors, opacity=0.8, name='ACF',
+    ))
+    # 95% CI bands
+    n = len(autocorr.lags)
+    fig.add_trace(go.Scatter(
+        x=autocorr.lags + autocorr.lags[::-1],
+        y=[autocorr.conf_upper] * n + [autocorr.conf_lower] * n,
+        fill='toself', fillcolor='rgba(100,116,139,0.15)',
+        line=dict(color='rgba(100,116,139,0.4)', dash='dash'),
+        showlegend=False, hoverinfo='skip',
+    ))
+    fig.add_hline(y=0, line_dash='solid', line_color='#64748b', line_width=0.5)
+    fig.update_layout(**_chart_layout(260, crosshair=False, showlegend=False, hovermode='closest'),
+                      xaxis_title='Lag (days)', yaxis_title='Autocorrelation',
+                      xaxis=dict(dtick=1))
+    return fig
+
+
+def create_day_hour_heatmap(day_hour_df: pd.DataFrame) -> go.Figure:
+    """Day-of-week × Hour mean return heatmap (intraday)."""
+    if day_hour_df is None or day_hour_df.empty:
+        return go.Figure()
+    z = day_hour_df.values.astype(float)
+    text = [[f"{v:.4f}%" if not np.isnan(v) else '' for v in row] for row in z]
+    fig = go.Figure(data=go.Heatmap(
+        z=z, x=[f"{int(h):02d}:00" for h in day_hour_df.columns],
+        y=day_hour_df.index.tolist(),
+        colorscale='RdYlGn', zmid=0,
+        text=text, texttemplate='%{text}',
+        showscale=True, colorbar=dict(title='Avg %', thickness=12),
+    ))
+    fig.update_layout(**_chart_layout(max(200, len(day_hour_df) * 45 + 60),
+                                      crosshair=False, hovermode='closest'))
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     return fig
