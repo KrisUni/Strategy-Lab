@@ -10,6 +10,7 @@ import streamlit as st
 
 from src.backtest import BacktestEngine
 from src.indicators import hpdr_bands
+from src.strategy import SignalGenerator
 from ui.helpers import params_to_strategy, calculate_beta_alpha
 from ui.charts import (
     create_equity_chart,
@@ -74,7 +75,7 @@ def render_backtest_tab() -> None:
             c3.metric("Avg MAE", f"{r.avg_mae:.2f}%")
             c4.metric("Avg MFE", f"{r.avg_mfe:.2f}%")
 
-    # ── Price chart (with optional HPDR overlay) ──────────────────────────
+    # ── Price chart (with optional HPDR overlay + strategy indicators) ───────
     if st.session_state.df is not None:
         p = st.session_state.params
         df_chart = st.session_state.df
@@ -90,9 +91,20 @@ def render_backtest_tab() -> None:
             except Exception as e:
                 st.warning(f"HPDR bands error: {e}")
 
+        # Calculate indicator values so enabled strategy indicators render on chart
+        indicator_df = None
+        try:
+            sg = SignalGenerator(params_to_strategy(p))
+            indicator_df = sg.calculate_indicators(df_chart.copy())
+        except Exception:
+            pass
+
         trades_to_show = st.session_state.backtest_results.trades if st.session_state.backtest_results else None
         st.plotly_chart(
-            create_price_chart_with_trades(df_chart, trades_to_show, bands=bands_data),
+            create_price_chart_with_trades(
+                df_chart, trades_to_show, bands=bands_data,
+                params=p, indicator_df=indicator_df,
+            ),
             use_container_width=True, config=PLOTLY_CONFIG
         )
 

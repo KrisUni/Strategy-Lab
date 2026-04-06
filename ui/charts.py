@@ -137,17 +137,70 @@ _RANGE_BUTTONS_SHORT = [
 # Price chart
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) -> go.Figure:
+def create_price_chart_with_trades(
+    df: pd.DataFrame,
+    trades=None,
+    bands=None,
+    params: Optional[dict] = None,
+    indicator_df: Optional[pd.DataFrame] = None,
+) -> go.Figure:
     """
-    Price chart with optional trade markers and HPDR rainbow cone overlay.
+    Price chart with optional trade markers, HPDR overlay, and strategy indicator panels.
 
-    Y-axis is always locked to the actual price range so HPDR band traces
-    (which extend well beyond price on trending instruments) never push
-    the axis into unusable territory.
+    When params and indicator_df are provided, enabled strategy indicators are rendered:
+    - Overlay indicators (MA Trend, Supertrend, VWAP) are drawn on the price panel.
+    - Oscillator indicators (PAMRP, BBWP, RSI, ADX, MACD, Stoch RSI) get sub-panels
+      with a shared x-axis.
+
+    Y-axis of the price panel is always locked to the actual price range.
     """
-    fig = go.Figure()
+    p = params or {}
+    idf = indicator_df
 
-    # ── HPDR rainbow cone — drawn BEFORE candles so it sits behind ────────────
+    # ── Decide which indicators to display ───────────────────────────────────
+    overlay_inds: List[str] = []   # drawn on price panel
+    sub_panel_inds: List[str] = [] # each gets its own subplot row
+
+    if idf is not None and p:
+        if p.get('ma_trend_enabled') and 'ma_fast' in idf.columns:
+            overlay_inds.append('ma')
+        if p.get('supertrend_enabled') and 'supertrend' in idf.columns:
+            overlay_inds.append('supertrend')
+        if p.get('vwap_enabled') and 'vwap' in idf.columns:
+            overlay_inds.append('vwap')
+        if (p.get('pamrp_enabled') or p.get('pamrp_exit_enabled')) and 'pamrp' in idf.columns:
+            sub_panel_inds.append('pamrp')
+        if (p.get('bbwp_enabled') or p.get('bbwp_exit_enabled')) and 'bbwp' in idf.columns:
+            sub_panel_inds.append('bbwp')
+        if p.get('rsi_enabled') and 'rsi' in idf.columns:
+            sub_panel_inds.append('rsi')
+        if p.get('adx_enabled') and 'adx' in idf.columns:
+            sub_panel_inds.append('adx')
+        if p.get('macd_enabled') and 'macd' in idf.columns:
+            sub_panel_inds.append('macd')
+        if p.get('stoch_rsi_exit_enabled') and 'stoch_k' in idf.columns:
+            sub_panel_inds.append('stoch')
+
+    n_sub = len(sub_panel_inds)
+    use_subplots = n_sub > 0
+
+    # ── Build figure (with or without sub-panels) ─────────────────────────────
+    if use_subplots:
+        sub_frac = min(0.45, 0.15 * n_sub)
+        price_frac = 1.0 - sub_frac
+        row_heights = [price_frac] + [sub_frac / n_sub] * n_sub
+        fig = make_subplots(
+            rows=1 + n_sub, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.02,
+            row_heights=row_heights,
+        )
+        r1 = dict(row=1, col=1)
+    else:
+        fig = go.Figure()
+        r1 = {}
+
+    # ── HPDR rainbow cone — drawn BEFORE candles so it sits behind ───────────
     if bands is not None:
         idx = df.index
 
@@ -174,10 +227,10 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
                 continue
             fig.add_trace(go.Scatter(x=idx, y=u_outer, mode='lines',
                 line=dict(width=0.5, color=fill_rgba.replace('0.18', '0.4').replace('0.20', '0.4')),
-                showlegend=False, hoverinfo='skip'))
+                showlegend=False, hoverinfo='skip'), **r1)
             fig.add_trace(go.Scatter(x=idx, y=u_inner, mode='lines',
                 line=dict(width=0), fill='tonexty', fillcolor=fill_rgba,
-                showlegend=False, hoverinfo='skip'))
+                showlegend=False, hoverinfo='skip'), **r1)
 
         for inner_z, outer_z, fill_rgba in ZONES:
             l_inner = lower.get(inner_z) if inner_z != '0.0' else center
@@ -185,15 +238,15 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
             if l_inner is None or l_outer is None:
                 continue
             fig.add_trace(go.Scatter(x=idx, y=l_inner, mode='lines',
-                line=dict(width=0), showlegend=False, hoverinfo='skip'))
+                line=dict(width=0), showlegend=False, hoverinfo='skip'), **r1)
             fig.add_trace(go.Scatter(x=idx, y=l_outer, mode='lines',
                 line=dict(width=0.5, color=fill_rgba.replace('0.18', '0.4').replace('0.20', '0.4')),
-                fill='tonexty', fillcolor=fill_rgba, showlegend=False, hoverinfo='skip'))
+                fill='tonexty', fillcolor=fill_rgba, showlegend=False, hoverinfo='skip'), **r1)
 
         if center is not None:
             fig.add_trace(go.Scatter(x=idx, y=center, mode='lines',
                 line=dict(color='rgba(255,255,255,0.35)', width=1, dash='dot'),
-                name='HPDR Center', showlegend=True, hoverinfo='skip'))
+                name='HPDR Center', showlegend=True, hoverinfo='skip'), **r1)
 
         for z, color in [('0.5', 'rgba(0,195,180,0.6)'), ('1.0', 'rgba(60,190,80,0.5)'),
                           ('1.5', 'rgba(200,185,0,0.5)'), ('2.0', 'rgba(220,110,30,0.5)'),
@@ -206,19 +259,16 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
                         line=dict(color=color, width=0.8),
                         name=f'HPDR ±{z}σ ({pct})' if side == 'upper' else None,
                         showlegend=(side == 'upper'),
-                        hovertemplate=f'±{z}σ: %{{y:.2f}}<extra></extra>'))
+                        hovertemplate=f'±{z}σ: %{{y:.2f}}<extra></extra>'), **r1)
 
     # ── Candlesticks ──────────────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'],
         increasing_line_color='#10b981', decreasing_line_color='#ef4444',
         increasing_fillcolor='rgba(16,185,129,0.3)', decreasing_fillcolor='rgba(239,68,68,0.3)',
-        name='Price'))
+        name='Price'), **r1)
 
-# ── Trade vertical lines (2 traces, not N shapes) ─────────────────────────
-    #   Draws all entries as one scatter trace, all exits as another,
-    #   using None-gap segments for vertical lines. This is O(1) traces
-    #   instead of O(N) shapes — massive rendering speedup for 50+ trades.
+    # ── Trade vertical lines (O(1) traces via None-gap segments) ─────────────
     if trades:
         price_min = float(df['low'].min())
         price_max = float(df['high'].max())
@@ -230,31 +280,11 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
             if t.exit_date and t.entry_date == t.exit_date:
                 same_bar_dates.add(t.entry_date)
 
-        # Build entry segments: for each trade, 2 points + None gap
-        entry_x, entry_y, entry_colors, entry_hover = [], [], [], []
         exit_x, exit_y, exit_hover = [], [], []
-
-        for t in trades:
-            # Entry segment
-            entry_x.extend([t.entry_date, t.entry_date, None])
-            entry_y.extend([y_lo, y_hi, None])
-            c = '#10b981' if t.direction == 'long' else '#ef4444'
-            entry_colors.append(c)
-            label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
-            entry_hover.extend([label, label, None])
-
-            # Exit segment
-            if t.exit_date:
-                exit_x.extend([t.exit_date, t.exit_date, None])
-                exit_y.extend([y_lo, y_hi, None])
-                label = f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})"
-                exit_hover.extend([label, label, None])
-
-        # Split entries into long vs short traces (different colors)
         long_x, long_y, long_h = [], [], []
         short_x, short_y, short_h = [], [], []
+
         for t in trades:
-            is_same = t.entry_date in same_bar_dates
             dst_x = long_x if t.direction == 'long' else short_x
             dst_y = long_y if t.direction == 'long' else short_y
             dst_h = long_h if t.direction == 'long' else short_h
@@ -263,45 +293,161 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
             label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
             dst_h.extend([label, label, None])
 
+            if t.exit_date:
+                exit_x.extend([t.exit_date, t.exit_date, None])
+                exit_y.extend([y_lo, y_hi, None])
+                label = f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})"
+                exit_hover.extend([label, label, None])
+
         if long_x:
-            fig.add_trace(go.Scattergl(
-                x=long_x, y=long_y, mode='lines',
+            fig.add_trace(go.Scattergl(x=long_x, y=long_y, mode='lines',
                 line=dict(color='rgba(16,185,129,0.5)', width=1),
                 text=long_h, hoverinfo='text',
-                name='Long Entries', showlegend=False,
-            ))
+                name='Long Entries', showlegend=False), **r1)
         if short_x:
-            fig.add_trace(go.Scattergl(
-                x=short_x, y=short_y, mode='lines',
+            fig.add_trace(go.Scattergl(x=short_x, y=short_y, mode='lines',
                 line=dict(color='rgba(239,68,68,0.5)', width=1),
                 text=short_h, hoverinfo='text',
-                name='Short Entries', showlegend=False,
-            ))
+                name='Short Entries', showlegend=False), **r1)
         if exit_x:
-            fig.add_trace(go.Scattergl(
-                x=exit_x, y=exit_y, mode='lines',
+            fig.add_trace(go.Scattergl(x=exit_x, y=exit_y, mode='lines',
                 line=dict(color='rgba(245,158,11,0.5)', width=1),
                 text=exit_hover, hoverinfo='text',
-                name='Exits', showlegend=False,
-            ))
+                name='Exits', showlegend=False), **r1)
+
+    # ── Overlay indicators on price panel ─────────────────────────────────────
+    if idf is not None:
+        if 'ma' in overlay_inds:
+            ma_type = p.get('ma_type', 'sma').upper()
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['ma_fast'], mode='lines',
+                line=dict(color='#3b82f6', width=1.2),
+                name=f"{ma_type}({p.get('ma_fast_length', 50)})", showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['ma_slow'], mode='lines',
+                line=dict(color='#f59e0b', width=1.2),
+                name=f"{ma_type}({p.get('ma_slow_length', 200)})", showlegend=True), **r1)
+
+        if 'supertrend' in overlay_inds:
+            bull_st = idf['supertrend'].where(idf['st_direction'] > 0)
+            bear_st = idf['supertrend'].where(idf['st_direction'] < 0)
+            fig.add_trace(go.Scatter(x=idf.index, y=bull_st, mode='lines',
+                line=dict(color='#10b981', width=1.5),
+                name='Supertrend ▲', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=bear_st, mode='lines',
+                line=dict(color='#ef4444', width=1.5),
+                name='Supertrend ▼', showlegend=True), **r1)
+
+        if 'vwap' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['vwap'], mode='lines',
+                line=dict(color='#a855f7', width=1.2, dash='dash'),
+                name='VWAP', showlegend=True), **r1)
+
+    # ── Oscillator sub-panels ─────────────────────────────────────────────────
+    if idf is not None:
+        for i, panel_name in enumerate(sub_panel_inds):
+            row = i + 2
+            rn = dict(row=row, col=1)
+
+            if panel_name == 'pamrp':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['pamrp'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='PAMRP', showlegend=True), **rn)
+                fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='PAMRP', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'bbwp':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='BBWP', showlegend=True), **rn)
+                if 'bbwp_sma' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp_sma'], mode='lines',
+                        line=dict(color='#f59e0b', width=1),
+                        name='BBWP SMA', showlegend=True), **rn)
+                fig.add_hline(y=p.get('bbwp_threshold_long', 50), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('bbwp_threshold_short', 50), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='BBWP', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'rsi':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['rsi'], mode='lines',
+                    line=dict(color='#a855f7', width=1.2),
+                    name=f"RSI({p.get('rsi_length', 14)})", showlegend=True), **rn)
+                fig.add_hline(y=p.get('rsi_oversold', 30), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('rsi_overbought', 70), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=50, line_color='rgba(255,255,255,0.15)', row=row, col=1)
+                fig.update_yaxes(title_text='RSI', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'adx':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['adx'], mode='lines',
+                    line=dict(color='#f59e0b', width=1.2),
+                    name='ADX', showlegend=True), **rn)
+                if 'di_plus' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['di_plus'], mode='lines',
+                        line=dict(color='#10b981', width=0.8),
+                        name='+DI', showlegend=True), **rn)
+                if 'di_minus' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['di_minus'], mode='lines',
+                        line=dict(color='#ef4444', width=0.8),
+                        name='-DI', showlegend=True), **rn)
+                fig.add_hline(y=p.get('adx_threshold', 20), line_dash='dash',
+                    line_color='rgba(255,255,255,0.3)', row=row, col=1)
+                fig.update_yaxes(title_text='ADX',
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'macd':
+                hist = idf['macd_hist'].fillna(0)
+                bar_colors = [
+                    'rgba(16,185,129,0.7)' if v >= 0 else 'rgba(239,68,68,0.7)'
+                    for v in hist
+                ]
+                fig.add_trace(go.Bar(x=idf.index, y=hist,
+                    marker_color=bar_colors,
+                    name='MACD Hist', showlegend=True), **rn)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['macd'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='MACD', showlegend=True), **rn)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['macd_signal'], mode='lines',
+                    line=dict(color='#f59e0b', width=1),
+                    name='Signal', showlegend=True), **rn)
+                fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', row=row, col=1)
+                fig.update_yaxes(title_text='MACD',
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'stoch':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_k'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='Stoch %K', showlegend=True), **rn)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_d'], mode='lines',
+                    line=dict(color='#f59e0b', width=1),
+                    name='Stoch %D', showlegend=True), **rn)
+                fig.add_hline(y=p.get('stoch_rsi_overbought', 80), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('stoch_rsi_oversold', 20), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='Stoch RSI', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
     price_min = float(df['low'].min())
     price_max = float(df['high'].max())
     pad = (price_max - price_min) * 0.05
     y_range = [price_min - pad, price_max + pad]
 
-    show_legend = bands is not None
+    show_legend = bands is not None or bool(overlay_inds) or bool(sub_panel_inds)
+    total_height = 400 + n_sub * 120
+
     fig.update_layout(
-        **_chart_layout(400, showlegend=show_legend,
+        **_chart_layout(total_height, showlegend=show_legend,
                         legend=dict(orientation='h', y=1.06, font=dict(size=8), traceorder='normal')),
         xaxis_rangeslider_visible=False,
-        xaxis_rangeslider=dict(
-            visible=False,
-            thickness=0.04,
-            bgcolor='rgba(10,14,20,0.5)',
-            bordercolor='#2d3548',
-            borderwidth=1,
-        ),
         xaxis_rangeselector=dict(
             buttons=_RANGE_BUTTONS_FULL,
             x=0, y=1.06,
@@ -309,7 +455,13 @@ def create_price_chart_with_trades(df: pd.DataFrame, trades=None, bands=None) ->
         ),
     )
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
-    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', range=y_range)
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
+
+    if use_subplots:
+        fig.update_yaxes(range=y_range, row=1, col=1)
+    else:
+        fig.update_yaxes(range=y_range)
+
     return fig
 
 
