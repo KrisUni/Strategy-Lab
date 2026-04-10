@@ -7,14 +7,15 @@ Renders the Backtest tab content (tabs[0]).
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.backtest import BacktestEngine
-from src.indicators import hpdr_bands
 from src.strategy import SignalGenerator
 from ui.helpers import params_to_strategy, calculate_beta_alpha
+from ui.lightweight_chart import create_lightweight_price_chart_html
 from ui.charts import (
     create_equity_chart,
-    create_price_chart_with_trades,
+    create_indicator_panels_chart,
     create_rsi_divergence_chart,
     create_bh_comparison_chart,
     PLOTLY_CONFIG,
@@ -104,17 +105,6 @@ def render_backtest_tab() -> None:
         p = st.session_state.params
         df_chart = st.session_state.df
 
-        bands_data = None
-        if p.get('hpdr_enabled'):
-            try:
-                bands_data = hpdr_bands(
-                    df_chart['close'],
-                    lookback=int(p.get('hpdr_lookback', 252)),
-                    z_scores=(0.5, 1.0, 1.5, 2.0, 2.5),
-                )
-            except Exception as e:
-                st.warning(f"HPDR bands error: {e}")
-
         # Calculate indicator values so enabled strategy indicators render on chart
         indicator_df = None
         try:
@@ -124,17 +114,37 @@ def render_backtest_tab() -> None:
             pass
 
         trades_to_show = st.session_state.backtest_results.trades if st.session_state.backtest_results else None
-        st.plotly_chart(
-            create_price_chart_with_trades(
-                df_chart, trades_to_show, bands=bands_data,
-                params=p, indicator_df=indicator_df,
+        st.markdown("##### Price Chart")
+        st.caption("Primary view uses a TradingView-style chart for smoother pan and zoom.")
+        components.html(
+            create_lightweight_price_chart_html(
+                df_chart,
+                trades=trades_to_show,
+                params=p,
+                indicator_df=indicator_df,
             ),
-            use_container_width=True, config=PLOTLY_CONFIG
+            height=565,
+            scrolling=False,
         )
+
+        indicator_fig = create_indicator_panels_chart(p, indicator_df)
+        if indicator_fig.data:
+            st.markdown("##### Indicators")
+            st.plotly_chart(
+                indicator_fig,
+                use_container_width=True, config=PLOTLY_CONFIG,
+                theme=None, key="backtest_indicator_panels_chart",
+            )
 
     # ── Equity & drawdown curves ──────────────────────────────────────────
     if st.session_state.backtest_results:
-        st.plotly_chart(create_equity_chart(r), use_container_width=True, config=PLOTLY_CONFIG)
+        st.plotly_chart(
+            create_equity_chart(r),
+            use_container_width=True,
+            config=PLOTLY_CONFIG,
+            theme=None,
+            key="backtest_equity_chart",
+        )
 
     # ── RSI Hidden Divergence sub-panel ───────────────────────────────────
     if st.session_state.df is not None:
@@ -154,18 +164,19 @@ def render_backtest_tab() -> None:
                     )
                     st.plotly_chart(
                         create_rsi_divergence_chart(df_chart, p),
-                        use_container_width=True, config=PLOTLY_CONFIG
+                        use_container_width=True, config=PLOTLY_CONFIG,
+                        theme=None, key="backtest_rsi_divergence_chart",
                     )
                 except Exception as e:
                     st.warning(f"RSI Divergence chart error: {e}")
-
-    # ── Trade log ─────────────────────────────────────────────────────────
-    _render_trade_log()
 
     # ── Strategy vs Buy & Hold ─────────────────────────────────────────────
     if st.session_state.backtest_results and st.session_state.df is not None:
         with st.expander("⚖️ Strategy vs Buy & Hold", expanded=False):
             _render_bh_comparison(st.session_state.backtest_results, st.session_state.df)
+
+    # ── Trade log ─────────────────────────────────────────────────────────
+    _render_trade_log()
 
 
 def _calculate_curve_stats(curve: pd.Series, bars_per_year: int) -> dict[str, float]:
@@ -256,47 +267,48 @@ def _render_trade_log() -> None:
     if not (st.session_state.backtest_results and st.session_state.backtest_results.trades):
         return
 
-    st.markdown("### 📋 Trade Log")
-    trades = st.session_state.backtest_results.trades
+    with st.expander("📋 Trade Log", expanded=False):
+        trades = st.session_state.backtest_results.trades
 
-    c1, c2 = st.columns(2)
-    dir_f = c1.selectbox("Dir", ["All", "Long", "Short"])
-    res_f = c2.selectbox("Result", ["All", "Winners", "Losers"])
+        c1, c2 = st.columns(2)
+        dir_f = c1.selectbox("Dir", ["All", "Long", "Short"])
+        res_f = c2.selectbox("Result", ["All", "Winners", "Losers"])
 
-    flt = trades
-    if dir_f != "All":
-        flt = [t for t in flt if t.direction.lower() == dir_f.lower()]
-    if res_f == "Winners":
-        flt = [t for t in flt if t.pnl > 0]
-    elif res_f == "Losers":
-        flt = [t for t in flt if t.pnl <= 0]
+        flt = trades
+        if dir_f != "All":
+            flt = [t for t in flt if t.direction.lower() == dir_f.lower()]
+        if res_f == "Winners":
+            flt = [t for t in flt if t.pnl > 0]
+        elif res_f == "Losers":
+            flt = [t for t in flt if t.pnl <= 0]
 
-    if not flt:
-        return
+        if not flt:
+            st.info("No trades match the current filters.")
+            return
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Trades", len(flt))
-    total_pnl = sum(t.pnl for t in flt)
-    c2.metric("Total PnL", f"${total_pnl:,.2f}")
-    c3.metric("Avg", f"${np.mean([t.pnl for t in flt]):.2f}")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Trades", len(flt))
+        total_pnl = sum(t.pnl for t in flt)
+        c2.metric("Total PnL", f"${total_pnl:,.2f}")
+        c3.metric("Avg", f"${np.mean([t.pnl for t in flt]):.2f}")
 
-    trade_df = pd.DataFrame([{
-        'Entry': t.entry_date,
-        'Exit': t.exit_date,
-        'Dir': t.direction,
-        'Entry$': round(t.entry_price, 2),
-        'Exit$': round(t.exit_price, 2) if t.exit_price else None,
-        'Size$': round(t.size_dollars, 0),
-        'PnL$': round(t.pnl, 2),
-        'PnL%': round(t.pnl_pct, 3),
-        'Bars': t.bars_held,
-        'MAE%': round(t.mae, 2),
-        'MFE%': round(t.mfe, 2),
-        'Reason': t.exit_reason,
-    } for t in flt])
+        trade_df = pd.DataFrame([{
+            'Entry': t.entry_date,
+            'Exit': t.exit_date,
+            'Dir': t.direction,
+            'Entry$': round(t.entry_price, 2),
+            'Exit$': round(t.exit_price, 2) if t.exit_price else None,
+            'Size$': round(t.size_dollars, 0),
+            'PnL$': round(t.pnl, 2),
+            'PnL%': round(t.pnl_pct, 3),
+            'Bars': t.bars_held,
+            'MAE%': round(t.mae, 2),
+            'MFE%': round(t.mfe, 2),
+            'Reason': t.exit_reason,
+        } for t in flt])
 
-    st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", use_container_width=True)
-    st.dataframe(trade_df, use_container_width=True, hide_index=True)
+        st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", use_container_width=True)
+        st.dataframe(trade_df, use_container_width=True, hide_index=True)
 
 
 def _render_bh_comparison(r, df: pd.DataFrame) -> None:
@@ -359,6 +371,7 @@ def _render_bh_comparison(r, df: pd.DataFrame) -> None:
             benchmark_name='Buy & Hold (Long-only)',
         ),
         use_container_width=True, config=PLOTLY_CONFIG,
+        theme=None, key="backtest_bh_comparison_chart",
     )
 
     ba = calculate_beta_alpha(

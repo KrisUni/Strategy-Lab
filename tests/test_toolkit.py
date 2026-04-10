@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import generate_sample_data
 from src.indicators import pamrp, bbwp, rsi, macd, supertrend, atr, sma, ema
-from src.strategy import StrategyParams, SignalGenerator, TradeDirection
+from src.strategy import StrategyParams, SignalGenerator, TradeDirection, ConditionOperator
 from src.backtest import BacktestEngine
 
 
@@ -159,6 +159,90 @@ class TestStrategy:
         diff = (result['pamrp_entry'] - result['pamrp_exit']).abs().dropna()
         assert not diff.empty
         assert (diff > 1e-9).any()
+
+    def test_entry_operator_defaults_and_round_trips(self, default_params):
+        """Entry/exit operators should serialize and deserialize cleanly."""
+        d = default_params.to_dict()
+        assert d['entry_operator'] == 'and'
+        assert d['exit_operator'] == 'or'
+
+        params = StrategyParams.from_dict({'entry_operator': 'or', 'exit_operator': 'and'})
+        assert params.entry_operator == ConditionOperator.OR
+        assert params.exit_operator == ConditionOperator.AND
+
+    def test_entry_operator_or_allows_any_enabled_filter(self):
+        """OR entry mode should trigger when any enabled filter is true."""
+        idx = pd.RangeIndex(3)
+        df = pd.DataFrame({
+            'pamrp_entry': [10, 60, 10],
+            'rsi': [50, 20, 20],
+        }, index=idx)
+        params = StrategyParams(
+            pamrp_enabled=True,
+            rsi_enabled=True,
+            entry_operator=ConditionOperator.OR,
+            trade_direction=TradeDirection.BOTH,
+        )
+
+        result = SignalGenerator(params).generate_entry_signals(df)
+
+        assert result['entry_long'].tolist() == [True, True, True]
+        assert result['entry_short'].tolist() == [False, False, False]
+
+    def test_entry_operator_and_requires_all_enabled_filters(self):
+        """AND entry mode should require every enabled filter to pass."""
+        idx = pd.RangeIndex(3)
+        df = pd.DataFrame({
+            'pamrp_entry': [10, 60, 10],
+            'rsi': [50, 20, 20],
+        }, index=idx)
+        params = StrategyParams(
+            pamrp_enabled=True,
+            rsi_enabled=True,
+            entry_operator=ConditionOperator.AND,
+            trade_direction=TradeDirection.BOTH,
+        )
+
+        result = SignalGenerator(params).generate_entry_signals(df)
+
+        assert result['entry_long'].tolist() == [False, False, True]
+        assert result['entry_short'].tolist() == [False, False, False]
+
+    def test_exit_operator_or_matches_legacy_behavior(self):
+        """OR exit mode should fire when any signal exit condition is true."""
+        idx = pd.RangeIndex(3)
+        df = pd.DataFrame({
+            'pamrp_exit': [75, 60, 85],
+            'bbwp': [70, 85, 90],
+        }, index=idx)
+        params = StrategyParams(
+            pamrp_exit_enabled=True,
+            bbwp_exit_enabled=True,
+            exit_operator=ConditionOperator.OR,
+        )
+
+        result = SignalGenerator(params).generate_exit_signals(df)
+
+        assert result['exit_long_signal'].tolist() == [True, True, True]
+        assert result['exit_short_signal'].tolist() == [False, False, False]
+
+    def test_exit_operator_and_requires_all_signal_exits(self):
+        """AND exit mode should require every enabled signal exit condition to pass."""
+        idx = pd.RangeIndex(3)
+        df = pd.DataFrame({
+            'pamrp_exit': [75, 60, 85],
+            'bbwp': [70, 85, 90],
+        }, index=idx)
+        params = StrategyParams(
+            pamrp_exit_enabled=True,
+            bbwp_exit_enabled=True,
+            exit_operator=ConditionOperator.AND,
+        )
+
+        result = SignalGenerator(params).generate_exit_signals(df)
+
+        assert result['exit_long_signal'].tolist() == [False, False, True]
+        assert result['exit_short_signal'].tolist() == [False, False, False]
 
 
 class TestBacktest:

@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 from typing import Dict, Any
 
-from src.strategy import StrategyParams, TradeDirection
+from src.strategy import StrategyParams, TradeDirection, ConditionOperator
 from ui.state_migration import migrate_legacy_pamrp_params
 
 
@@ -23,6 +23,7 @@ from ui.state_migration import migrate_legacy_pamrp_params
 # ─────────────────────────────────────────────────────────────────────────────
 
 PARAM_TO_WIDGET_KEY: Dict[str, str] = {
+    'entry_operator': 'eop', 'exit_operator': 'xop',
     'pamrp_enabled': 'pe', 'pamrp_entry_length': 'ple', 'pamrp_entry_long': 'pel', 'pamrp_entry_short': 'pes',
     'pamrp_exit_length': 'pxl_len', 'pamrp_exit_long': 'pxl_exit', 'pamrp_exit_short': 'pxs_exit',
     'bbwp_enabled': 'be', 'bbwp_length': 'bl', 'bbwp_lookback': 'blb', 'bbwp_sma_length': 'bsma',
@@ -58,8 +59,21 @@ def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
         'Short Only': TradeDirection.SHORT_ONLY,
         'Both': TradeDirection.BOTH,
     }
+
+    def parse_operator(value: Any, default: ConditionOperator) -> ConditionOperator:
+        if isinstance(value, ConditionOperator):
+            return value
+        if isinstance(value, str):
+            try:
+                return ConditionOperator(value.lower())
+            except ValueError:
+                return default
+        return default
+
     return StrategyParams(
         trade_direction=direction_map.get(p.get('trade_direction', 'Long Only'), TradeDirection.LONG_ONLY),
+        entry_operator=parse_operator(p.get('entry_operator', 'and'), ConditionOperator.AND),
+        exit_operator=parse_operator(p.get('exit_operator', 'or'), ConditionOperator.OR),
         position_size_pct=p.get('position_size_pct', 100.0),
         use_kelly=p.get('use_kelly', False), kelly_fraction=p.get('kelly_fraction', 0.5),
         pamrp_enabled=p.get('pamrp_enabled', True),

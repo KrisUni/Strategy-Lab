@@ -18,6 +18,8 @@ from ui.state_migration import migrate_legacy_pamrp_params, migrate_legacy_pamrp
 def get_default_params() -> Dict[str, Any]:
     return {
         'trade_direction': 'Long Only',
+        'entry_operator': 'and',
+        'exit_operator': 'or',
         'position_size_pct': 100.0, 'use_kelly': False, 'kelly_fraction': 0.5,
         'pamrp_enabled': False, 'pamrp_entry_length': 21, 'pamrp_entry_long': 20, 'pamrp_entry_short': 80,
         'pamrp_exit_length': 21, 'pamrp_exit_long': 70, 'pamrp_exit_short': 30,

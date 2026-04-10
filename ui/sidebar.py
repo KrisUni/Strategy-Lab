@@ -149,6 +149,15 @@ def _render_position_sizing(p: dict) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_entry_indicators(p: dict) -> None:
+    p['entry_operator'] = st.radio(
+        "Combine Entry Filters",
+        options=["and", "or"],
+        index=["and", "or"].index(p.get('entry_operator', 'and')),
+        format_func=lambda value: "Match all (AND)" if value == "and" else "Match any (OR)",
+        horizontal=True,
+        key="eop",
+    )
+
     with st.expander("📊 PAMRP", expanded=False):
         p['pamrp_enabled'] = st.toggle("Enable", p['pamrp_enabled'], key="pe")
         if p['pamrp_enabled']:
@@ -249,6 +258,15 @@ def _render_visual_indicators(p: dict) -> None:
 def _render_exit_indicators(p: dict) -> None:
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
     st.markdown("### 🚪 Exits")
+    p['exit_operator'] = st.radio(
+        "Combine Signal Exits",
+        options=["and", "or"],
+        index=["and", "or"].index(p.get('exit_operator', 'or')),
+        format_func=lambda value: "Match all (AND)" if value == "and" else "Match any (OR)",
+        horizontal=True,
+        key="xop",
+        help="Applies to signal-based exits below. Stop-loss, take-profit, trailing, ATR, and time exits still trigger independently.",
+    )
 
     with st.expander("🛑 Stop Loss", expanded=False):
         p['stop_loss_enabled'] = st.toggle("Enable", p['stop_loss_enabled'], key="sle")

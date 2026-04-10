@@ -22,7 +22,7 @@ try:
 except ImportError:
     raise ImportError("Install optuna: pip install optuna")
 
-from ..strategy import StrategyParams, TradeDirection
+from ..strategy import StrategyParams, TradeDirection, ConditionOperator
 from ..backtest import (
     BacktestEngine,
     BacktestResults,
@@ -462,6 +462,14 @@ class BayesianOptimizer:
         """
         pp = self.pinned_params  # dict of {param_name: fixed_value}
 
+        def p_operator(name: str, default: ConditionOperator) -> ConditionOperator:
+            value = pp.get(name, default)
+            if isinstance(value, ConditionOperator):
+                return value
+            if isinstance(value, str):
+                return ConditionOperator(value.lower())
+            return default
+
         # Local helpers — check pin first, fall back to Optuna suggest
         def p_int(name: str, lo: int, hi: int) -> int:
             return int(pp[name]) if name in pp else trial.suggest_int(name, lo, hi)
@@ -557,6 +565,8 @@ class BayesianOptimizer:
 
         return StrategyParams(
             trade_direction=self.trade_direction,
+            entry_operator=p_operator('entry_operator', ConditionOperator.AND),
+            exit_operator=p_operator('exit_operator', ConditionOperator.OR),
             pamrp_enabled=pe,
             pamrp_entry_length=peln,
             pamrp_entry_long=pel, pamrp_entry_short=pes, pamrp_exit_long=pxl, pamrp_exit_short=pxs,

@@ -54,6 +54,18 @@ _INDICATOR_LABELS = {
     'time_exit_enabled': 'Time Exit', 'ma_exit_enabled': 'MA Exit', 'bbwp_exit_enabled': 'BBWP Exit',
 }
 
+_SIDEBAR_TO_OPT_DIRECTION = {
+    'Long Only': 'long_only',
+    'Short Only': 'short_only',
+    'Both': 'both',
+}
+
+_OPT_DIRECTION_LABELS = {
+    'long_only': 'Long Only',
+    'short_only': 'Short Only',
+    'both': 'Both',
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public entry point
@@ -62,9 +74,17 @@ _INDICATOR_LABELS = {
 def render_optimize_tab() -> None:
     st.markdown("### 🎯 Optimization")
 
+    _sync_opt_direction_with_strategy()
+
     c1, c2, c3, c4 = st.columns(4)
     opt_metric = c1.selectbox("Metric", ["profit_factor", "sharpe_ratio", "total_return_pct", "sortino_ratio"])
-    opt_dir = c2.selectbox("Dir", ["long_only", "short_only", "both"])
+    opt_dir = c2.selectbox(
+        "Direction",
+        ["long_only", "short_only", "both"],
+        key="opt_dir",
+        format_func=lambda value: _OPT_DIRECTION_LABELS[value],
+        help="Defaults to the current strategy direction. Change it only when you want optimization to target a different direction.",
+    )
     opt_trials = c3.slider("Trials", 50, 1500, 500)
     opt_min = c4.slider("Min Trades", 5, 30, 10)
 
@@ -104,6 +124,8 @@ def render_optimize_tab() -> None:
             pinned_dict = {k: st.session_state.params[k]
                            for k in normalized_pins
                            if k in st.session_state.params}
+            pinned_dict.setdefault('entry_operator', st.session_state.params.get('entry_operator', 'and'))
+            pinned_dict.setdefault('exit_operator', st.session_state.params.get('exit_operator', 'or'))
             with st.spinner("Optimizing..."):
                 res = optimize_strategy(
                     df=st.session_state.df.copy(), enabled_filters=ef,
@@ -161,6 +183,21 @@ def _render_pin_expander() -> None:
             for k in pinned_set if any(pk == k for pk, _ in p_list)
         )
         st.caption(f"🔒 Pinned: **{pinned_names}**")
+
+
+def _sync_opt_direction_with_strategy() -> None:
+    current_strategy_direction = _SIDEBAR_TO_OPT_DIRECTION.get(
+        st.session_state.params.get('trade_direction', 'Long Only'),
+        'long_only',
+    )
+    previous_strategy_direction = st.session_state.get('_last_strategy_trade_direction')
+
+    if 'opt_dir' not in st.session_state:
+        st.session_state.opt_dir = current_strategy_direction
+    elif previous_strategy_direction is not None and st.session_state.opt_dir == previous_strategy_direction:
+        st.session_state.opt_dir = current_strategy_direction
+
+    st.session_state._last_strategy_trade_direction = current_strategy_direction
 
 
 def _render_results() -> None:

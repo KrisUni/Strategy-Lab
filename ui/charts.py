@@ -90,6 +90,8 @@ def _chart_layout(height: int = 280, crosshair: bool = False, **kwargs) -> dict:
         showlegend=False,
         margin=dict(l=50, r=20, t=10, b=30),
         font=dict(size=9),
+        # Preserve user-driven zoom/pan state when Streamlit rerenders the figure.
+        uirevision='preserve-view',
         # ── Interaction ──
         dragmode='pan',             # drag = pan; shift+drag = zoom box
         hovermode='closest',      # unified tooltip on time-series
@@ -279,11 +281,6 @@ def create_price_chart_with_trades(
         pad = (price_max - price_min) * 0.05
         y_lo, y_hi = price_min - pad, price_max + pad
 
-        same_bar_dates = set()
-        for t in trades:
-            if t.exit_date and t.entry_date == t.exit_date:
-                same_bar_dates.add(t.entry_date)
-
         exit_x, exit_y, exit_hover = [], [], []
         long_x, long_y, long_h = [], [], []
         short_x, short_y, short_h = [], [], []
@@ -304,17 +301,19 @@ def create_price_chart_with_trades(
                 exit_hover.extend([label, label, None])
 
         if long_x:
-            fig.add_trace(go.Scattergl(x=long_x, y=long_y, mode='lines',
+            # Keep the price chart on Plotly's SVG renderer. Mixing Scattergl
+            # with candlesticks causes visibly clipy redraws while zooming.
+            fig.add_trace(go.Scatter(x=long_x, y=long_y, mode='lines',
                 line=dict(color='rgba(16,185,129,0.5)', width=1),
                 text=long_h, hoverinfo='text',
                 name='Long Entries', showlegend=False), **r1)
         if short_x:
-            fig.add_trace(go.Scattergl(x=short_x, y=short_y, mode='lines',
+            fig.add_trace(go.Scatter(x=short_x, y=short_y, mode='lines',
                 line=dict(color='rgba(239,68,68,0.5)', width=1),
                 text=short_h, hoverinfo='text',
                 name='Short Entries', showlegend=False), **r1)
         if exit_x:
-            fig.add_trace(go.Scattergl(x=exit_x, y=exit_y, mode='lines',
+            fig.add_trace(go.Scatter(x=exit_x, y=exit_y, mode='lines',
                 line=dict(color='rgba(245,158,11,0.5)', width=1),
                 text=exit_hover, hoverinfo='text',
                 name='Exits', showlegend=False), **r1)
@@ -489,13 +488,196 @@ def create_price_chart_with_trades(
         ),
     )
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
-    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
+    # Keep zoom interaction on the time axis only. Letting Plotly zoom/pan the
+    # y-axes during wheel zoom is what makes the chart feel like it is snapping
+    # between rescaled frames.
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
 
     if use_subplots:
         fig.update_yaxes(range=y_range, row=1, col=1)
     else:
         fig.update_yaxes(range=y_range)
 
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Indicator-only panels
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_indicator_panels_chart(
+    params: dict | None,
+    indicator_df: pd.DataFrame | None,
+) -> go.Figure:
+    """
+    Plotly-only indicator panels that complement the lightweight main price
+    chart without duplicating the price panel itself.
+    """
+    p = migrate_legacy_pamrp_params(params or {})
+    idf = indicator_df
+    if idf is None or idf.empty:
+        return go.Figure()
+
+    sub_panel_inds: List[str] = []
+    if (
+        p.get('pamrp_enabled')
+        or p.get('pamrp_exit_enabled')
+    ) and any(col in idf.columns for col in ('pamrp_entry', 'pamrp_exit', 'pamrp')):
+        sub_panel_inds.append('pamrp')
+    if (p.get('bbwp_enabled') or p.get('bbwp_exit_enabled')) and 'bbwp' in idf.columns:
+        sub_panel_inds.append('bbwp')
+    if p.get('rsi_enabled') and 'rsi' in idf.columns:
+        sub_panel_inds.append('rsi')
+    if p.get('adx_enabled') and 'adx' in idf.columns:
+        sub_panel_inds.append('adx')
+    if p.get('macd_enabled') and 'macd' in idf.columns:
+        sub_panel_inds.append('macd')
+    if p.get('stoch_rsi_exit_enabled') and 'stoch_k' in idf.columns:
+        sub_panel_inds.append('stoch')
+
+    if not sub_panel_inds:
+        return go.Figure()
+
+    n_sub = len(sub_panel_inds)
+    fig = make_subplots(
+        rows=n_sub, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[1.0 / n_sub] * n_sub,
+    )
+
+    for i, panel_name in enumerate(sub_panel_inds):
+        row = i + 1
+        rn = dict(row=row, col=1)
+
+        if panel_name == 'pamrp':
+            entry_length = p.get('pamrp_entry_length', 21)
+            exit_length = p.get('pamrp_exit_length', 21)
+            show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
+            show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
+            same_length = entry_length == exit_length
+
+            if show_entry:
+                fig.add_trace(go.Scatter(
+                    x=idf.index, y=idf['pamrp_entry'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='PAMRP Entry' if show_exit and not same_length else 'PAMRP',
+                    showlegend=True,
+                ), **rn)
+            elif 'pamrp' in idf.columns:
+                fig.add_trace(go.Scatter(
+                    x=idf.index, y=idf['pamrp'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='PAMRP', showlegend=True,
+                ), **rn)
+
+            if show_exit and (not show_entry or not same_length):
+                fig.add_trace(go.Scatter(
+                    x=idf.index, y=idf['pamrp_exit'], mode='lines',
+                    line=dict(color='#f59e0b', width=1.2, dash='dot'),
+                    name='PAMRP Exit', showlegend=True,
+                ), **rn)
+
+            if p.get('pamrp_enabled'):
+                fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+            if p.get('pamrp_exit_enabled'):
+                fig.add_hline(y=p.get('pamrp_exit_long', 70), line_dash='dot',
+                    line_color='rgba(245,158,11,0.7)', row=row, col=1)
+                fig.add_hline(y=p.get('pamrp_exit_short', 30), line_dash='dot',
+                    line_color='rgba(249,115,22,0.7)', row=row, col=1)
+            fig.update_yaxes(title_text='PAMRP', range=[0, 100],
+                title_font=dict(size=8), row=row, col=1)
+
+        elif panel_name == 'bbwp':
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp'], mode='lines',
+                line=dict(color='#60a5fa', width=1.2),
+                name='BBWP', showlegend=True), **rn)
+            if 'bbwp_sma' in idf.columns:
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp_sma'], mode='lines',
+                    line=dict(color='#f59e0b', width=1),
+                    name='BBWP SMA', showlegend=True), **rn)
+            fig.add_hline(y=p.get('bbwp_threshold_long', 50), line_dash='dash',
+                line_color='rgba(16,185,129,0.6)', row=row, col=1)
+            fig.add_hline(y=p.get('bbwp_threshold_short', 50), line_dash='dash',
+                line_color='rgba(239,68,68,0.6)', row=row, col=1)
+            fig.update_yaxes(title_text='BBWP', range=[0, 100],
+                title_font=dict(size=8), row=row, col=1)
+
+        elif panel_name == 'rsi':
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['rsi'], mode='lines',
+                line=dict(color='#a855f7', width=1.2),
+                name=f"RSI({p.get('rsi_length', 14)})", showlegend=True), **rn)
+            fig.add_hline(y=p.get('rsi_oversold', 30), line_dash='dash',
+                line_color='rgba(16,185,129,0.6)', row=row, col=1)
+            fig.add_hline(y=p.get('rsi_overbought', 70), line_dash='dash',
+                line_color='rgba(239,68,68,0.6)', row=row, col=1)
+            fig.add_hline(y=50, line_color='rgba(255,255,255,0.15)', row=row, col=1)
+            fig.update_yaxes(title_text='RSI', range=[0, 100],
+                title_font=dict(size=8), row=row, col=1)
+
+        elif panel_name == 'adx':
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['adx'], mode='lines',
+                line=dict(color='#f59e0b', width=1.2),
+                name='ADX', showlegend=True), **rn)
+            if 'di_plus' in idf.columns:
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['di_plus'], mode='lines',
+                    line=dict(color='#10b981', width=0.8),
+                    name='+DI', showlegend=True), **rn)
+            if 'di_minus' in idf.columns:
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['di_minus'], mode='lines',
+                    line=dict(color='#ef4444', width=0.8),
+                    name='-DI', showlegend=True), **rn)
+            fig.add_hline(y=p.get('adx_threshold', 20), line_dash='dash',
+                line_color='rgba(255,255,255,0.3)', row=row, col=1)
+            fig.update_yaxes(title_text='ADX',
+                title_font=dict(size=8), row=row, col=1)
+
+        elif panel_name == 'macd':
+            hist = idf['macd_hist'].fillna(0)
+            bar_colors = [
+                'rgba(16,185,129,0.7)' if v >= 0 else 'rgba(239,68,68,0.7)'
+                for v in hist
+            ]
+            fig.add_trace(go.Bar(x=idf.index, y=hist,
+                marker_color=bar_colors,
+                name='MACD Hist', showlegend=True), **rn)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['macd'], mode='lines',
+                line=dict(color='#60a5fa', width=1.2),
+                name='MACD', showlegend=True), **rn)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['macd_signal'], mode='lines',
+                line=dict(color='#f59e0b', width=1),
+                name='Signal', showlegend=True), **rn)
+            fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', row=row, col=1)
+            fig.update_yaxes(title_text='MACD',
+                title_font=dict(size=8), row=row, col=1)
+
+        elif panel_name == 'stoch':
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_k'], mode='lines',
+                line=dict(color='#60a5fa', width=1.2),
+                name='Stoch %K', showlegend=True), **rn)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_d'], mode='lines',
+                line=dict(color='#f59e0b', width=1),
+                name='Stoch %D', showlegend=True), **rn)
+            fig.add_hline(y=p.get('stoch_rsi_overbought', 80), line_dash='dash',
+                line_color='rgba(239,68,68,0.6)', row=row, col=1)
+            fig.add_hline(y=p.get('stoch_rsi_oversold', 20), line_dash='dash',
+                line_color='rgba(16,185,129,0.6)', row=row, col=1)
+            fig.update_yaxes(title_text='Stoch RSI', range=[0, 100],
+                title_font=dict(size=8), row=row, col=1)
+
+    fig.update_layout(
+        **_chart_layout(
+            120 + n_sub * 120,
+            showlegend=True,
+            legend=dict(orientation='h', y=1.04, font=dict(size=8), traceorder='normal'),
+        ),
+        xaxis_rangeslider_visible=False,
+    )
+    fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
     return fig
 
 
@@ -574,6 +756,7 @@ def create_rsi_divergence_chart(df: pd.DataFrame, p: dict) -> go.Figure:
         xaxis_rangeslider_visible=False)
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
     fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
+    fig.update_yaxes(fixedrange=True)
     fig.update_yaxes(title_text='RSI', range=[0, 100], row=2, col=1)
     return fig
 
@@ -596,7 +779,7 @@ def create_equity_chart(results) -> go.Figure:
     fig.update_layout(**_chart_layout(340, showlegend=True, legend=dict(orientation='h', y=1.12, font=dict(size=8))))
     fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
-    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
     return fig
 
 
@@ -644,7 +827,7 @@ def create_bh_comparison_chart(
     ))
     fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
-    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
     return fig
 
 
@@ -665,7 +848,7 @@ def create_stitched_equity_chart(equity: pd.Series) -> go.Figure:
     fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
     
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
-    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)')
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
     return fig
 
 
