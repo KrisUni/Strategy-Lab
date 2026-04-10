@@ -8,12 +8,10 @@ calls stay in the tab modules.
 NOTE: create_heatmap lives in ui/tabs/heatmap.py because it depends on
       BacktestEngine and params_to_strategy, avoiding a circular import.
 
-CHANGES (TradingView-style interaction):
-  - _chart_layout() now sets dragmode='pan', crosshair spikes, hovermode
-  - PLOTLY_CONFIG / PLOTLY_CONFIG_STATIC exported for tab modules
-  - fixedrange=True removed from all time-series charts
-  - Range selector buttons added to price + equity charts
-  - Thin rangeslider on price chart for overview navigation
+CHANGES (interaction defaults):
+  - _chart_layout() sets dragmode='pan', crosshair spikes, and hovermode
+  - PLOTLY_CONFIG is exported for tab modules
+  - Range selector buttons are available on price + equity charts
 """
 
 import numpy as np
@@ -45,14 +43,6 @@ PLOTLY_CONFIG = {
     ],
     'displaylogo': False,
 }
-
-# For small categorical charts (DOW, walkforward, heatmaps) where zoom is pointless
-PLOTLY_CONFIG_STATIC = {
-    'scrollZoom': False,
-    'displayModeBar': False,
-    'displaylogo': False,
-}
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Crosshair spike defaults
@@ -133,8 +123,6 @@ _RANGE_BUTTONS_SHORT = [
     dict(count=1, label='1Y', step='year', stepmode='backward'),
     dict(step='all', label='All'),
 ]
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Price chart
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,7 +176,6 @@ def create_price_chart_with_trades(
 
     n_sub = len(sub_panel_inds)
     use_subplots = n_sub > 0
-
     # ── Build figure (with or without sub-panels) ─────────────────────────────
     if use_subplots:
         sub_frac = min(0.45, 0.15 * n_sub)
@@ -280,42 +267,63 @@ def create_price_chart_with_trades(
         pad = (price_max - price_min) * 0.05
         y_lo, y_hi = price_min - pad, price_max + pad
 
-        exit_x, exit_y, exit_hover = [], [], []
         long_x, long_y, long_h = [], [], []
         short_x, short_y, short_h = [], [], []
+        long_exit_x, long_exit_y, long_exit_h = [], [], []
+        short_exit_x, short_exit_y, short_exit_h = [], [], []
 
         for t in trades:
+            same_bar = (
+                t.exit_idx is not None and t.entry_idx == t.exit_idx
+            ) or (
+                t.exit_date is not None and t.entry_date == t.exit_date
+            )
             dst_x = long_x if t.direction == 'long' else short_x
             dst_y = long_y if t.direction == 'long' else short_y
             dst_h = long_h if t.direction == 'long' else short_h
             dst_x.extend([t.entry_date, t.entry_date, None])
             dst_y.extend([y_lo, y_hi, None])
-            label = f"{'▲ Long' if t.direction == 'long' else '▼ Short'} @ ${t.entry_price:.2f}"
+            label = (
+                f"{'Long' if t.direction == 'long' else 'Short'} Entry @ ${t.entry_price:.2f}"
+                + (" | same-bar trade" if same_bar else "")
+            )
             dst_h.extend([label, label, None])
 
             if t.exit_date:
+                exit_x = long_exit_x if t.direction == 'long' else short_exit_x
+                exit_y = long_exit_y if t.direction == 'long' else short_exit_y
+                exit_h = long_exit_h if t.direction == 'long' else short_exit_h
                 exit_x.extend([t.exit_date, t.exit_date, None])
                 exit_y.extend([y_lo, y_hi, None])
-                label = f"Exit @ ${t.exit_price:.2f} | ${t.pnl:+.2f} ({t.exit_reason})"
-                exit_hover.extend([label, label, None])
+                label = (
+                    f"{'Long' if t.direction == 'long' else 'Short'} Exit @ ${t.exit_price:.2f}"
+                    f" | PnL ${t.pnl:+.2f} | {t.exit_reason}"
+                    + (" | same-bar" if same_bar else "")
+                )
+                exit_h.extend([label, label, None])
 
         if long_x:
             # Keep the price chart on Plotly's SVG renderer. Mixing Scattergl
             # with candlesticks causes visibly clipy redraws while zooming.
             fig.add_trace(go.Scatter(x=long_x, y=long_y, mode='lines',
-                line=dict(color='rgba(16,185,129,0.5)', width=1),
+                line=dict(color='rgba(16,185,129,0.8)', width=1.5),
                 text=long_h, hoverinfo='text',
-                name='Long Entries', showlegend=False), **r1)
+                name='Long Entries', showlegend=True), **r1)
         if short_x:
             fig.add_trace(go.Scatter(x=short_x, y=short_y, mode='lines',
-                line=dict(color='rgba(239,68,68,0.5)', width=1),
+                line=dict(color='rgba(239,68,68,0.8)', width=1.5),
                 text=short_h, hoverinfo='text',
-                name='Short Entries', showlegend=False), **r1)
-        if exit_x:
-            fig.add_trace(go.Scatter(x=exit_x, y=exit_y, mode='lines',
-                line=dict(color='rgba(245,158,11,0.5)', width=1),
-                text=exit_hover, hoverinfo='text',
-                name='Exits', showlegend=False), **r1)
+                name='Short Entries', showlegend=True), **r1)
+        if long_exit_x:
+            fig.add_trace(go.Scatter(x=long_exit_x, y=long_exit_y, mode='lines',
+                line=dict(color='rgba(56,189,248,0.95)', width=1.8, dash='dot'),
+                text=long_exit_h, hoverinfo='text',
+                name='Long Exits', showlegend=True), **r1)
+        if short_exit_x:
+            fig.add_trace(go.Scatter(x=short_exit_x, y=short_exit_y, mode='lines',
+                line=dict(color='rgba(245,158,11,0.95)', width=1.8, dash='dot'),
+                text=short_exit_h, hoverinfo='text',
+                name='Short Exits', showlegend=True), **r1)
 
     # ── Overlay indicators on price panel ─────────────────────────────────────
     if idf is not None:
@@ -473,7 +481,7 @@ def create_price_chart_with_trades(
     pad = (price_max - price_min) * 0.05
     y_range = [price_min - pad, price_max + pad]
 
-    show_legend = bands is not None or bool(overlay_inds) or bool(sub_panel_inds)
+    show_legend = bands is not None or bool(overlay_inds) or bool(sub_panel_inds) or bool(trades)
     total_height = 400 + n_sub * 120
 
     fig.update_layout(

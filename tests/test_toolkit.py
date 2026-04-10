@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import generate_sample_data
 from src.indicators import pamrp, bbwp, rsi, macd, supertrend, atr, sma, ema
-from src.strategy import StrategyParams, SignalGenerator, TradeDirection, ConditionOperator
+from src.strategy import StrategyParams, SignalGenerator, TradeDirection, ConditionOperator, EntryConflictMode
 from src.backtest import BacktestEngine
 
 
@@ -165,10 +165,22 @@ class TestStrategy:
         d = default_params.to_dict()
         assert d['entry_operator'] == 'and'
         assert d['exit_operator'] == 'or'
+        assert d['allow_same_bar_exit'] is True
+        assert d['allow_same_bar_reversal'] is False
+        assert d['entry_conflict_mode'] == 'skip'
 
-        params = StrategyParams.from_dict({'entry_operator': 'or', 'exit_operator': 'and'})
+        params = StrategyParams.from_dict({
+            'entry_operator': 'or',
+            'exit_operator': 'and',
+            'allow_same_bar_exit': False,
+            'allow_same_bar_reversal': True,
+            'entry_conflict_mode': 'prefer_short',
+        })
         assert params.entry_operator == ConditionOperator.OR
         assert params.exit_operator == ConditionOperator.AND
+        assert params.allow_same_bar_exit is False
+        assert params.allow_same_bar_reversal is True
+        assert params.entry_conflict_mode == EntryConflictMode.PREFER_SHORT
 
     def test_entry_operator_or_allows_any_enabled_filter(self):
         """OR entry mode should trigger when any enabled filter is true."""
@@ -327,6 +339,167 @@ class TestBacktest:
                 # Stop loss should be near the stop level
                 expected_stop = trade.entry_price * (1 - 2.0 / 100)
                 assert trade.exit_price <= trade.entry_price  # Exit below entry
+
+    def test_same_bar_exit_toggle_can_disable_entry_bar_stopout(self):
+        """Disabling same-bar exits should keep an entry-bar stop hit open until later bars."""
+        idx = pd.date_range("2024-01-01", periods=3, freq="D")
+        df = pd.DataFrame({
+            'open': [100.0, 100.0, 99.0],
+            'high': [101.0, 101.0, 100.0],
+            'low': [99.0, 96.0, 98.0],
+            'close': [100.0, 99.0, 99.0],
+            'volume': [1000, 1000, 1000],
+        }, index=idx)
+
+        def add_signals(frame):
+            frame = frame.copy()
+            frame['entry_long'] = [True, False, False]
+            frame['entry_short'] = [False, False, False]
+            frame['exit_long_signal'] = [False, False, False]
+            frame['exit_short_signal'] = [False, False, False]
+            return frame
+
+        enabled_engine = BacktestEngine(
+            StrategyParams(
+                stop_loss_enabled=True,
+                stop_loss_pct_long=3.0,
+                allow_same_bar_exit=True,
+            ),
+            commission_pct=0.0,
+            slippage_pct=0.0,
+        )
+        enabled_engine.signal_gen.generate_all_signals = add_signals
+        enabled_results = enabled_engine.run(df)
+
+        assert len(enabled_results.trades) == 1
+        assert enabled_results.trades[0].exit_reason == 'stop_loss'
+        assert enabled_results.trades[0].bars_held == 0
+
+        disabled_engine = BacktestEngine(
+            StrategyParams(
+                stop_loss_enabled=True,
+                stop_loss_pct_long=3.0,
+                allow_same_bar_exit=False,
+            ),
+            commission_pct=0.0,
+            slippage_pct=0.0,
+        )
+        disabled_engine.signal_gen.generate_all_signals = add_signals
+        disabled_results = disabled_engine.run(df)
+
+        assert len(disabled_results.trades) == 1
+        assert disabled_results.trades[0].exit_reason == 'end_of_data'
+        assert disabled_results.trades[0].bars_held == 1
+
+    def test_signal_exit_does_not_reverse_into_opposite_trade_on_same_bar(self):
+        """A signal exit should block immediate same-bar reversal into the opposite direction."""
+        idx = pd.date_range("2024-01-01", periods=4, freq="D")
+        df = pd.DataFrame({
+            'open': [100.0, 110.0, 120.0, 121.0],
+            'high': [101.0, 111.0, 121.0, 122.0],
+            'low': [99.0, 109.0, 119.0, 120.0],
+            'close': [100.0, 110.0, 120.0, 121.0],
+            'volume': [1000, 1000, 1000, 1000],
+        }, index=idx)
+
+        def add_signals(frame):
+            frame = frame.copy()
+            frame['entry_long'] = [True, False, False, False]
+            frame['entry_short'] = [False, True, False, False]
+            frame['exit_long_signal'] = [False, True, False, False]
+            frame['exit_short_signal'] = [False, False, False, False]
+            return frame
+
+        engine = BacktestEngine(
+            StrategyParams(
+                trade_direction=TradeDirection.BOTH,
+                stop_loss_enabled=False,
+                take_profit_enabled=False,
+                time_exit_enabled=False,
+            ),
+            commission_pct=0.0,
+            slippage_pct=0.0,
+        )
+        engine.signal_gen.generate_all_signals = add_signals
+        results = engine.run(df)
+
+        assert len(results.trades) == 1
+        assert results.trades[0].direction == 'long'
+        assert results.trades[0].exit_reason == 'signal'
+
+    def test_signal_exit_can_reverse_into_opposite_trade_on_same_bar_when_enabled(self):
+        """Same-bar reversal should be allowed only when the toggle is enabled."""
+        idx = pd.date_range("2024-01-01", periods=4, freq="D")
+        df = pd.DataFrame({
+            'open': [100.0, 110.0, 120.0, 118.0],
+            'high': [101.0, 111.0, 121.0, 119.0],
+            'low': [99.0, 109.0, 119.0, 117.0],
+            'close': [100.0, 110.0, 120.0, 118.0],
+            'volume': [1000, 1000, 1000, 1000],
+        }, index=idx)
+
+        def add_signals(frame):
+            frame = frame.copy()
+            frame['entry_long'] = [True, False, False, False]
+            frame['entry_short'] = [False, True, False, False]
+            frame['exit_long_signal'] = [False, True, False, False]
+            frame['exit_short_signal'] = [False, False, False, False]
+            return frame
+
+        engine = BacktestEngine(
+            StrategyParams(
+                trade_direction=TradeDirection.BOTH,
+                allow_same_bar_reversal=True,
+                stop_loss_enabled=False,
+                take_profit_enabled=False,
+                time_exit_enabled=False,
+            ),
+            commission_pct=0.0,
+            slippage_pct=0.0,
+        )
+        engine.signal_gen.generate_all_signals = add_signals
+        results = engine.run(df)
+
+        assert len(results.trades) == 2
+        assert results.trades[0].direction == 'long'
+        assert results.trades[0].exit_reason == 'signal'
+        assert results.trades[1].direction == 'short'
+        assert results.trades[1].entry_date == results.trades[0].exit_date
+
+    def test_ambiguous_entry_bar_is_skipped_when_both_directions_fire(self):
+        """When both long and short entries are true on the same bar, skip the bar."""
+        idx = pd.date_range("2024-01-01", periods=3, freq="D")
+        df = pd.DataFrame({
+            'open': [100.0, 101.0, 102.0],
+            'high': [101.0, 102.0, 103.0],
+            'low': [99.0, 100.0, 101.0],
+            'close': [100.0, 101.0, 102.0],
+            'volume': [1000, 1000, 1000],
+        }, index=idx)
+
+        def add_signals(frame):
+            frame = frame.copy()
+            frame['entry_long'] = [True, False, False]
+            frame['entry_short'] = [True, False, False]
+            frame['exit_long_signal'] = [False, False, False]
+            frame['exit_short_signal'] = [False, False, False]
+            return frame
+
+        engine = BacktestEngine(
+            StrategyParams(
+                trade_direction=TradeDirection.BOTH,
+                entry_conflict_mode=EntryConflictMode.SKIP,
+                stop_loss_enabled=False,
+                take_profit_enabled=False,
+                time_exit_enabled=False,
+            ),
+            commission_pct=0.0,
+            slippage_pct=0.0,
+        )
+        engine.signal_gen.generate_all_signals = add_signals
+        results = engine.run(df)
+
+        assert results.num_trades == 0
 
 
 class TestDataModule:

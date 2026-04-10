@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
-from ..strategy import StrategyParams, SignalGenerator
+from ..strategy import StrategyParams, SignalGenerator, EntryConflictMode
 
 DEFAULT_COMMISSION_PCT = 0.1
 DEFAULT_SLIPPAGE_PCT = 0.0
@@ -110,8 +110,11 @@ class BacktestEngine:
     - Stop orders (SL/TP/trailing/ATR): trigger on high/low, fill at
       order level OR bar open if the open gaps past the level (whichever
       is worse for the trader). This is how real stop-market orders work.
-    - SL/TP are checked on the ENTRY bar itself (bar[i] after entering
-      at bar[i]'s open). If the bar's range hits the stop, exit same bar.
+    - Same-bar entry exits are optional. When enabled, stop-type exits are
+      checked on the ENTRY bar itself (bar[i] after entering at bar[i]'s
+      open). If the bar's range hits the stop, exit same bar.
+    - Same-bar reversal after a signal/time exit is optional. When enabled,
+      the opposite direction may enter on that same bar's open.
     - Signal exits: prev-bar signal → this bar's open (no look-ahead).
     - Time exits: execute at this bar's open (decision known at open).
     - SL/TP same-bar conflict: closer-to-open wins.
@@ -405,6 +408,7 @@ class BacktestEngine:
             row = df.iloc[i]
             prev_row = df.iloc[i - 1]
             intrabar_exit = False  # Reset each bar
+            exited_direction_this_bar = None
 
             # ═══════════════════════════════════════════════════════════════
             # POSITION MANAGEMENT (exits)
@@ -480,14 +484,16 @@ class BacktestEngine:
                         sum_loss_pct += abs(position.pnl_pct)
                         count_losses += 1
 
-                    # Flag: if exit was intrabar (SL/TP/trailing/ATR),
-                    # we must NOT re-enter on this same bar's open because
-                    # the stop was hit AFTER the open. Signal and time exits
-                    # execute at open, so re-entry blocks until next bar.
-                    intrabar_exit = exit_reason in (
-                        'stop_loss', 'take_profit', 'trailing_stop',
-                        'atr_trailing', 'time_exit'
-                    )
+                    exited_direction_this_bar = position.direction
+
+                    # Stop-like exits happen after the open, so they always block
+                    # any new entry until the next bar. Signal and time exits
+                    # execute at the open and may optionally allow same-bar
+                    # reversal into the opposite direction.
+                    if exit_reason in ('signal', 'time_exit'):
+                        intrabar_exit = not p.allow_same_bar_reversal
+                    else:
+                        intrabar_exit = True
 
                     position = None
                     bars_in_trade = 0
@@ -504,15 +510,25 @@ class BacktestEngine:
                 realized_avg_win = (sum_win_pct / count_wins) if count_wins > 0 else 0.0
                 realized_avg_loss = (sum_loss_pct / count_losses) if count_losses > 0 else 0.0
 
-                # Detect churn: if we just signal-exited a direction,
-                # don't re-enter same direction on the same bar.
-                just_exited_direction = None
-                if (len(trades) > 0 and trades[-1].exit_idx == i
-                        and trades[-1].exit_reason == 'signal'):
-                    just_exited_direction = trades[-1].direction
+                long_signal = bool(prev_row['entry_long'])
+                short_signal = bool(prev_row['entry_short'])
+
+                if exited_direction_this_bar == 'long':
+                    long_signal = False
+                elif exited_direction_this_bar == 'short':
+                    short_signal = False
+
+                if long_signal and short_signal:
+                    if p.entry_conflict_mode == EntryConflictMode.SKIP:
+                        long_signal = False
+                        short_signal = False
+                    elif p.entry_conflict_mode == EntryConflictMode.PREFER_SHORT:
+                        long_signal = False
+                    else:
+                        short_signal = False
 
                 entered = False
-                if prev_row['entry_long'] and just_exited_direction != 'long':
+                if long_signal:
                     entry_price = row['open'] * (1 + self.slippage_pct / 100)
                     size_dollars = self._calculate_trade_size_dollars(
                         cash, entry_price, win_rate,
@@ -525,7 +541,7 @@ class BacktestEngine:
                     )
                     entered = True
 
-                elif prev_row['entry_short'] and just_exited_direction != 'short':
+                elif short_signal:
                     entry_price = row['open'] * (1 - self.slippage_pct / 100)
                     size_dollars = self._calculate_trade_size_dollars(
                         cash, entry_price, win_rate,
@@ -544,7 +560,7 @@ class BacktestEngine:
                     lowest_since_entry = row['low']
 
                     # ─────────────────────────────────────────────────────
-                    # BUG 2 FIX: Check SL/TP on the ENTRY bar.
+                    # BUG 2 FIX: Optional same-bar stop checks on the ENTRY bar.
                     #
                     # We just entered at this bar's open. The bar's
                     # high/low may already breach our stop or take-profit
@@ -561,36 +577,37 @@ class BacktestEngine:
 
                     bars_in_trade = 0  # Will be incremented next iteration
 
-                    entry_exit_price, entry_exit_reason = self._check_stop_exits(
-                        position, row, p,
-                        highest_since_entry, lowest_since_entry,
-                        0, df  # bars_in_trade=0 on entry bar
-                    )
-
-                    if entry_exit_price is not None:
-                        position, pnl = self._close_position(
-                            position, entry_exit_price, entry_exit_reason,
-                            i, row.name, 0,  # bars_held=0 (same bar)
-                            current_mae, current_mfe
+                    if p.allow_same_bar_exit:
+                        entry_exit_price, entry_exit_reason = self._check_stop_exits(
+                            position, row, p,
+                            highest_since_entry, lowest_since_entry,
+                            0, df  # bars_in_trade=0 on entry bar
                         )
-                        trades.append(position)
-                        cash += position.size_dollars + pnl
 
-                        recent_total += 1
-                        if pnl > 0:
-                            recent_wins += 1
-                            sum_win_pct += abs(position.pnl_pct)
-                            count_wins += 1
-                        else:
-                            sum_loss_pct += abs(position.pnl_pct)
-                            count_losses += 1
+                        if entry_exit_price is not None:
+                            position, pnl = self._close_position(
+                                position, entry_exit_price, entry_exit_reason,
+                                i, row.name, 0,  # bars_held=0 (same bar)
+                                current_mae, current_mfe
+                            )
+                            trades.append(position)
+                            cash += position.size_dollars + pnl
 
-                        position = None
-                        bars_in_trade = 0
-                        highest_since_entry = 0.0
-                        lowest_since_entry = float('inf')
-                        # intrabar_exit already False, no re-entry this bar
-                        # because we're past the entry block
+                            recent_total += 1
+                            if pnl > 0:
+                                recent_wins += 1
+                                sum_win_pct += abs(position.pnl_pct)
+                                count_wins += 1
+                            else:
+                                sum_loss_pct += abs(position.pnl_pct)
+                                count_losses += 1
+
+                            position = None
+                            bars_in_trade = 0
+                            highest_since_entry = 0.0
+                            lowest_since_entry = float('inf')
+                            # intrabar_exit already False, no re-entry this bar
+                            # because we're past the entry block
 
             # ═══════════════════════════════════════════════════════════════
             # MARK-TO-MARKET EQUITY

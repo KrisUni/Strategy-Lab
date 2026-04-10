@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 from typing import Dict, Any
 
-from src.strategy import StrategyParams, TradeDirection, ConditionOperator
+from src.strategy import StrategyParams, TradeDirection, ConditionOperator, EntryConflictMode
 from ui.state_migration import migrate_legacy_pamrp_params
 
 
@@ -23,7 +23,11 @@ from ui.state_migration import migrate_legacy_pamrp_params
 # ─────────────────────────────────────────────────────────────────────────────
 
 PARAM_TO_WIDGET_KEY: Dict[str, str] = {
+    'trade_direction': 'tdir',
     'entry_operator': 'eop', 'exit_operator': 'xop',
+    'allow_same_bar_exit': 'same_bar_exit',
+    'allow_same_bar_reversal': 'same_bar_reversal',
+    'entry_conflict_mode': 'ecm',
     'pamrp_enabled': 'pe', 'pamrp_entry_length': 'ple', 'pamrp_entry_long': 'pel', 'pamrp_entry_short': 'pes',
     'pamrp_exit_length': 'pxl_len', 'pamrp_exit_long': 'pxl_exit', 'pamrp_exit_short': 'pxs_exit',
     'bbwp_enabled': 'be', 'bbwp_length': 'bl', 'bbwp_lookback': 'blb', 'bbwp_sma_length': 'bsma',
@@ -70,10 +74,23 @@ def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
                 return default
         return default
 
+    def parse_entry_conflict_mode(value: Any, default: EntryConflictMode) -> EntryConflictMode:
+        if isinstance(value, EntryConflictMode):
+            return value
+        if isinstance(value, str):
+            try:
+                return EntryConflictMode(value.lower())
+            except ValueError:
+                return default
+        return default
+
     return StrategyParams(
         trade_direction=direction_map.get(p.get('trade_direction', 'Long Only'), TradeDirection.LONG_ONLY),
         entry_operator=parse_operator(p.get('entry_operator', 'and'), ConditionOperator.AND),
         exit_operator=parse_operator(p.get('exit_operator', 'or'), ConditionOperator.OR),
+        allow_same_bar_exit=p.get('allow_same_bar_exit', True),
+        allow_same_bar_reversal=p.get('allow_same_bar_reversal', False),
+        entry_conflict_mode=parse_entry_conflict_mode(p.get('entry_conflict_mode', 'skip'), EntryConflictMode.SKIP),
         position_size_pct=p.get('position_size_pct', 100.0),
         use_kelly=p.get('use_kelly', False), kelly_fraction=p.get('kelly_fraction', 0.5),
         pamrp_enabled=p.get('pamrp_enabled', True),
@@ -179,7 +196,9 @@ def apply_best_params_callback() -> None:
             st.session_state[wk] = v
     if 'trade_direction_str' in bp:
         dm = {'long_only': 'Long Only', 'short_only': 'Short Only', 'both': 'Both'}
-        st.session_state.params['trade_direction'] = dm.get(bp['trade_direction_str'], 'Long Only')
+        trade_direction = dm.get(bp['trade_direction_str'], 'Long Only')
+        st.session_state.params['trade_direction'] = trade_direction
+        st.session_state.tdir = trade_direction
     st.session_state.capital = res.initial_capital
     st.session_state.commission = res.commission_pct
     st.session_state.slippage = getattr(res, 'slippage_pct', st.session_state.get('slippage', 0.0))

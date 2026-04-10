@@ -24,6 +24,8 @@ _INTERVAL_MAX_DAYS = {
 }
 
 INTERVALS = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
+TRADE_DIRECTION_OPTIONS = ["Long Only", "Short Only", "Both"]
+ENTRY_CONFLICT_OPTIONS = ["skip", "prefer_long", "prefer_short"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -43,9 +45,24 @@ def render_sidebar() -> None:
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
         st.markdown("### ⚙️ Strategy")
 
+        _sync_trade_direction_widget(p.get('trade_direction', 'Long Only'))
         p['trade_direction'] = st.selectbox(
-            "Direction", ["Long Only", "Short Only", "Both"],
-            index=["Long Only", "Short Only", "Both"].index(p['trade_direction']))
+            "Direction",
+            TRADE_DIRECTION_OPTIONS,
+            key="tdir",
+        )
+        p['entry_conflict_mode'] = st.selectbox(
+            "If Long And Short Trigger Together",
+            ENTRY_CONFLICT_OPTIONS,
+            index=ENTRY_CONFLICT_OPTIONS.index(p.get('entry_conflict_mode', 'skip')),
+            format_func=lambda value: {
+                "skip": "Skip ambiguous bar",
+                "prefer_long": "Prefer long",
+                "prefer_short": "Prefer short",
+            }[value],
+            key="ecm",
+            help="Controls what happens when both entry directions are true on the same bar in Both mode.",
+        )
 
         _render_position_sizing(p)
         _render_entry_indicators(p)
@@ -53,6 +70,24 @@ def render_sidebar() -> None:
         _render_exit_indicators(p)
 
     st.session_state.params = p
+
+
+def _sync_trade_direction_widget(current_direction: str) -> None:
+    if current_direction not in TRADE_DIRECTION_OPTIONS:
+        current_direction = "Long Only"
+
+    previous_strategy_direction = st.session_state.get('_last_sidebar_trade_direction')
+
+    if 'tdir' not in st.session_state:
+        st.session_state.tdir = current_direction
+    elif (
+        previous_strategy_direction is not None
+        and current_direction != previous_strategy_direction
+        and st.session_state.tdir == previous_strategy_direction
+    ):
+        st.session_state.tdir = current_direction
+
+    st.session_state._last_sidebar_trade_direction = current_direction
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +293,18 @@ def _render_visual_indicators(p: dict) -> None:
 def _render_exit_indicators(p: dict) -> None:
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
     st.markdown("### 🚪 Exits")
+    p['allow_same_bar_exit'] = st.toggle(
+        "Allow Same-Bar Entry/Exit",
+        value=p.get('allow_same_bar_exit', True),
+        key="same_bar_exit",
+        help="When enabled, stop-loss, take-profit, trailing, and ATR exits can close a trade on the same bar it opened. Disable to force the trade to survive at least until the next bar.",
+    )
+    p['allow_same_bar_reversal'] = st.toggle(
+        "Allow Same-Bar Reversal After Exit",
+        value=p.get('allow_same_bar_reversal', False),
+        key="same_bar_reversal",
+        help="When enabled, a signal or time exit at the current bar open may be followed by an opposite-direction entry on that same bar. Intrabar stop-type exits still wait until the next bar.",
+    )
     p['exit_operator'] = st.radio(
         "Combine Signal Exits",
         options=["and", "or"],

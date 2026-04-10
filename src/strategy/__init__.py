@@ -19,7 +19,6 @@ Changes from previous version
 """
 
 import pandas as pd
-import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Any, Iterable
 from enum import Enum
@@ -41,6 +40,12 @@ class ConditionOperator(str, Enum):
     OR = "or"
 
 
+class EntryConflictMode(str, Enum):
+    SKIP = "skip"
+    PREFER_LONG = "prefer_long"
+    PREFER_SHORT = "prefer_short"
+
+
 @dataclass
 class StrategyParams:
     """All strategy parameters — fully exposed."""
@@ -48,6 +53,9 @@ class StrategyParams:
     trade_direction: TradeDirection = TradeDirection.LONG_ONLY
     entry_operator: ConditionOperator = ConditionOperator.AND
     exit_operator: ConditionOperator = ConditionOperator.OR
+    allow_same_bar_exit: bool = True
+    allow_same_bar_reversal: bool = False
+    entry_conflict_mode: EntryConflictMode = EntryConflictMode.SKIP
 
     # Position Sizing
     position_size_pct: float = 100.0
@@ -171,6 +179,8 @@ class StrategyParams:
             d['entry_operator'] = ConditionOperator(d['entry_operator'].lower())
         if 'exit_operator' in d and isinstance(d['exit_operator'], str):
             d['exit_operator'] = ConditionOperator(d['exit_operator'].lower())
+        if 'entry_conflict_mode' in d and isinstance(d['entry_conflict_mode'], str):
+            d['entry_conflict_mode'] = EntryConflictMode(d['entry_conflict_mode'].lower())
         legacy_pamrp_length = d.pop('pamrp_length', None)
         if legacy_pamrp_length is not None:
             d.setdefault('pamrp_entry_length', legacy_pamrp_length)

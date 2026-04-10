@@ -126,6 +126,9 @@ def render_optimize_tab() -> None:
                            if k in st.session_state.params}
             pinned_dict.setdefault('entry_operator', st.session_state.params.get('entry_operator', 'and'))
             pinned_dict.setdefault('exit_operator', st.session_state.params.get('exit_operator', 'or'))
+            pinned_dict.setdefault('allow_same_bar_exit', st.session_state.params.get('allow_same_bar_exit', True))
+            pinned_dict.setdefault('allow_same_bar_reversal', st.session_state.params.get('allow_same_bar_reversal', False))
+            pinned_dict.setdefault('entry_conflict_mode', st.session_state.params.get('entry_conflict_mode', 'skip'))
             with st.spinner("Optimizing..."):
                 res = optimize_strategy(
                     df=st.session_state.df.copy(), enabled_filters=ef,
