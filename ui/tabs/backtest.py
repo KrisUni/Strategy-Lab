@@ -10,11 +10,14 @@ import streamlit as st
 
 from src.backtest import BacktestEngine
 from src.indicators import hpdr_bands
-from ui.helpers import params_to_strategy
+from src.strategy import SignalGenerator
+from ui.helpers import params_to_strategy, calculate_beta_alpha
 from ui.charts import (
     create_equity_chart,
     create_price_chart_with_trades,
-    create_rsi_divergence_chart, PLOTLY_CONFIG
+    create_rsi_divergence_chart,
+    create_bh_comparison_chart,
+    PLOTLY_CONFIG,
 )
 
 
@@ -72,7 +75,7 @@ def render_backtest_tab() -> None:
             c3.metric("Avg MAE", f"{r.avg_mae:.2f}%")
             c4.metric("Avg MFE", f"{r.avg_mfe:.2f}%")
 
-    # ── Price chart (with optional HPDR overlay) ──────────────────────────
+    # ── Price chart (with optional HPDR overlay + strategy indicators) ───────
     if st.session_state.df is not None:
         p = st.session_state.params
         df_chart = st.session_state.df
@@ -88,9 +91,20 @@ def render_backtest_tab() -> None:
             except Exception as e:
                 st.warning(f"HPDR bands error: {e}")
 
+        # Calculate indicator values so enabled strategy indicators render on chart
+        indicator_df = None
+        try:
+            sg = SignalGenerator(params_to_strategy(p))
+            indicator_df = sg.calculate_indicators(df_chart.copy())
+        except Exception:
+            pass
+
         trades_to_show = st.session_state.backtest_results.trades if st.session_state.backtest_results else None
         st.plotly_chart(
-            create_price_chart_with_trades(df_chart, trades_to_show, bands=bands_data),
+            create_price_chart_with_trades(
+                df_chart, trades_to_show, bands=bands_data,
+                params=p, indicator_df=indicator_df,
+            ),
             use_container_width=True, config=PLOTLY_CONFIG
         )
 
@@ -123,6 +137,11 @@ def render_backtest_tab() -> None:
 
     # ── Trade log ─────────────────────────────────────────────────────────
     _render_trade_log()
+
+    # ── Strategy vs Buy & Hold ─────────────────────────────────────────────
+    if st.session_state.backtest_results and st.session_state.backtest_results.trades:
+        with st.expander("⚖️ Strategy vs Buy & Hold", expanded=False):
+            _render_bh_comparison(st.session_state.backtest_results, st.session_state.df)
 
 
 def _render_trade_log() -> None:
@@ -171,3 +190,45 @@ def _render_trade_log() -> None:
 
     st.download_button("📥 Export CSV", trade_df.to_csv(index=False), "trades.csv", use_container_width=True)
     st.dataframe(trade_df, use_container_width=True, hide_index=True)
+
+
+def _render_bh_comparison(r, df: pd.DataFrame) -> None:
+    """Inline Strategy vs Buy & Hold comparison panel."""
+    ft = r.trades[0]
+    ep = ft.entry_price
+    ed = ft.entry_date
+    fp = df['close'].iloc[-1]
+    bh_pct = (fp - ep) / ep * 100  # B&H is always a long position
+    mask = df.index >= ed
+    prices = df.loc[mask, 'close']
+    peak = prices.expanding().max()
+    bh_dd = ((prices - peak) / peak * 100).min()
+
+    st.dataframe(
+        pd.DataFrame([
+            {'Strategy': '📊 Yours', 'Return %': f"{r.total_return_pct:.2f}%",
+             'CAGR': f"{r.cagr:.2f}%", 'Max DD': f"{r.max_drawdown_pct:.2f}%",
+             'Sharpe': f"{r.sharpe_ratio:.3f}"},
+            {'Strategy': '📈 B&H', 'Return %': f"{bh_pct:.2f}%",
+             'CAGR': '-', 'Max DD': f"{bh_dd:.2f}%", 'Sharpe': '-'},
+        ]),
+        use_container_width=True, hide_index=True,
+    )
+
+    diff = r.total_return_pct - bh_pct
+    msg = f"{'🏆 Strategy beats Buy & Hold by' if diff > 0 else '📉 B&H beats strategy by'} {abs(diff):.2f}%"
+    (st.success if diff > 0 else st.warning)(msg)
+
+    st.plotly_chart(
+        create_bh_comparison_chart(r.equity_curve, prices),
+        use_container_width=True, config=PLOTLY_CONFIG,
+    )
+
+    ba = calculate_beta_alpha(
+        r.equity_curve.pct_change().dropna(),
+        prices.pct_change().dropna(),
+    )
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Beta", f"{ba['beta']:.3f}")
+    c2.metric("Alpha (ann)", f"{ba['alpha']:.2f}%")
+    c3.metric("Correlation", f"{ba['correlation']:.3f}")

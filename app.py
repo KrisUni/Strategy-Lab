@@ -19,7 +19,6 @@ from ui.session import init_session_state
 from ui.sidebar import render_sidebar
 from ui.tabs.backtest import render_backtest_tab
 from ui.tabs.optimize import render_optimize_tab
-from ui.tabs.compare import render_compare_tab
 from ui.tabs.montecarlo import render_montecarlo_tab
 from ui.tabs.calendar import render_calendar_tab
 from ui.tabs.heatmap import render_heatmap_tab
@@ -49,7 +48,6 @@ st.markdown("# 📊 Strategy Lab")
 tabs = st.tabs([
     "🔬 Backtest",
     "🎯 Optimize",
-    "⚖️ Compare",
     "🎲 Monte Carlo",
     "📅 Calendar",
     "🔥 Heatmap",
@@ -63,18 +61,15 @@ with tabs[1]:
     render_optimize_tab()
 
 with tabs[2]:
-    render_compare_tab()
-
-with tabs[3]:
     render_montecarlo_tab()
 
-with tabs[4]:
+with tabs[3]:
     render_calendar_tab()
 
-with tabs[5]:
+with tabs[4]:
     render_heatmap_tab()
 
-with tabs[6]:
+with tabs[5]:
     render_multi_asset_tab()
 
 
