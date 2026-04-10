@@ -20,6 +20,11 @@ from ui.charts import (
     PLOTLY_CONFIG,
 )
 
+BH_WINDOW_OPTIONS = {
+    'full_window': 'Since start of data',
+    'since_first_trade': 'Since first strategy trade',
+}
+
 
 def render_backtest_tab() -> None:
     c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
@@ -158,9 +163,92 @@ def render_backtest_tab() -> None:
     _render_trade_log()
 
     # ── Strategy vs Buy & Hold ─────────────────────────────────────────────
-    if st.session_state.backtest_results and st.session_state.backtest_results.trades:
+    if st.session_state.backtest_results and st.session_state.df is not None:
         with st.expander("⚖️ Strategy vs Buy & Hold", expanded=False):
             _render_bh_comparison(st.session_state.backtest_results, st.session_state.df)
+
+
+def _calculate_curve_stats(curve: pd.Series, bars_per_year: int) -> dict[str, float]:
+    """Calculate comparable performance stats for any equity-like curve."""
+    if curve is None or len(curve) == 0:
+        return {'return_pct': 0.0, 'cagr': 0.0, 'max_dd_pct': 0.0, 'sharpe': 0.0}
+
+    start_val = float(curve.iloc[0])
+    end_val = float(curve.iloc[-1])
+
+    if start_val > 0:
+        total_return_pct = (end_val / start_val - 1.0) * 100
+    else:
+        total_return_pct = 0.0
+
+    n_bars = len(curve)
+    if n_bars > 1 and start_val > 0 and end_val > 0:
+        cagr = ((end_val / start_val) ** (bars_per_year / n_bars) - 1.0) * 100
+    else:
+        cagr = 0.0
+
+    peak = curve.expanding().max()
+    max_dd_pct = float(((curve - peak) / peak).min() * 100) if peak.max() > 0 else 0.0
+
+    returns = curve.pct_change().dropna()
+    active_returns = returns[returns != 0]
+    n_total_rets = len(returns)
+    n_active = len(active_returns)
+
+    if n_total_rets > 0 and n_active > 0:
+        active_bars_per_year = n_active * (bars_per_year / n_total_rets)
+    else:
+        active_bars_per_year = bars_per_year
+
+    if n_active > 1 and active_returns.std() > 0:
+        sharpe = float((active_returns.mean() / active_returns.std()) * np.sqrt(active_bars_per_year))
+    else:
+        sharpe = 0.0
+
+    return {
+        'return_pct': float(total_return_pct),
+        'cagr': float(cagr),
+        'max_dd_pct': max_dd_pct,
+        'sharpe': sharpe,
+    }
+
+
+def _build_bh_comparison_window(r, df: pd.DataFrame, window_mode: str) -> dict | None:
+    """Build aligned strategy and passive benchmark curves for the chosen window."""
+    if df is None or df.empty or r.equity_curve is None or len(r.equity_curve) == 0:
+        return None
+
+    if window_mode == 'since_first_trade' and r.trades:
+        window_label = BH_WINDOW_OPTIONS['since_first_trade']
+        start_date = r.trades[0].entry_date
+    else:
+        window_label = BH_WINDOW_OPTIONS['full_window']
+        start_date = df.index[0]
+
+    strategy_curve = r.equity_curve.loc[r.equity_curve.index >= start_date]
+    benchmark_prices = df.loc[df.index >= start_date, 'close']
+    common_index = strategy_curve.index.intersection(benchmark_prices.index)
+
+    if len(common_index) == 0:
+        return None
+
+    strategy_curve = strategy_curve.loc[common_index]
+    benchmark_prices = benchmark_prices.loc[common_index]
+
+    start_equity = float(strategy_curve.iloc[0])
+    start_price = float(benchmark_prices.iloc[0])
+    if start_equity <= 0 or start_price <= 0:
+        return None
+
+    benchmark_curve = benchmark_prices / start_price * start_equity
+
+    return {
+        'window_label': window_label,
+        'start_date': common_index[0],
+        'end_date': common_index[-1],
+        'strategy_curve': strategy_curve,
+        'benchmark_curve': benchmark_curve,
+    }
 
 
 def _render_trade_log() -> None:
@@ -213,39 +301,69 @@ def _render_trade_log() -> None:
 
 def _render_bh_comparison(r, df: pd.DataFrame) -> None:
     """Inline Strategy vs Buy & Hold comparison panel."""
-    ft = r.trades[0]
-    ep = ft.entry_price
-    ed = ft.entry_date
-    fp = df['close'].iloc[-1]
-    bh_pct = (fp - ep) / ep * 100  # B&H is always a long position
-    mask = df.index >= ed
-    prices = df.loc[mask, 'close']
-    peak = prices.expanding().max()
-    bh_dd = ((prices - peak) / peak * 100).min()
+    available_modes = ['full_window']
+    if r.trades:
+        available_modes.append('since_first_trade')
+
+    default_mode = st.session_state.get('bh_window_mode', available_modes[0])
+    if default_mode not in available_modes:
+        default_mode = available_modes[0]
+
+    selected_mode = st.radio(
+        "Benchmark Window",
+        available_modes,
+        format_func=lambda m: BH_WINDOW_OPTIONS[m],
+        horizontal=True,
+        index=available_modes.index(default_mode),
+        key="bh_window_mode",
+    )
+
+    comparison = _build_bh_comparison_window(r, df, selected_mode)
+    if comparison is None:
+        st.warning("Unable to build the buy-and-hold comparison for the selected window.")
+        return
+
+    strategy_curve = comparison['strategy_curve']
+    benchmark_curve = comparison['benchmark_curve']
+    strategy_stats = _calculate_curve_stats(strategy_curve, r.bars_per_year)
+    benchmark_stats = _calculate_curve_stats(benchmark_curve, r.bars_per_year)
+
+    st.caption("Benchmark is always long-only buy & hold of the underlying asset, regardless of strategy direction.")
+    st.caption(
+        f"Window: {comparison['window_label']} · "
+        f"{comparison['start_date'].date()} → {comparison['end_date'].date()}"
+    )
+    if not r.trades:
+        st.caption("No trades were taken, so only the full-data comparison window is available.")
 
     st.dataframe(
         pd.DataFrame([
-            {'Strategy': '📊 Yours', 'Return %': f"{r.total_return_pct:.2f}%",
-             'CAGR': f"{r.cagr:.2f}%", 'Max DD': f"{r.max_drawdown_pct:.2f}%",
-             'Sharpe': f"{r.sharpe_ratio:.3f}"},
-            {'Strategy': '📈 B&H', 'Return %': f"{bh_pct:.2f}%",
-             'CAGR': '-', 'Max DD': f"{bh_dd:.2f}%", 'Sharpe': '-'},
+            {'Strategy': '📊 Strategy', 'Return %': f"{strategy_stats['return_pct']:.2f}%",
+             'CAGR': f"{strategy_stats['cagr']:.2f}%", 'Max DD': f"{strategy_stats['max_dd_pct']:.2f}%",
+             'Sharpe': f"{strategy_stats['sharpe']:.3f}"},
+            {'Strategy': '📈 Buy & Hold (Long-only)', 'Return %': f"{benchmark_stats['return_pct']:.2f}%",
+             'CAGR': f"{benchmark_stats['cagr']:.2f}%", 'Max DD': f"{benchmark_stats['max_dd_pct']:.2f}%",
+             'Sharpe': f"{benchmark_stats['sharpe']:.3f}"},
         ]),
         use_container_width=True, hide_index=True,
     )
 
-    diff = r.total_return_pct - bh_pct
+    diff = strategy_stats['return_pct'] - benchmark_stats['return_pct']
     msg = f"{'🏆 Strategy beats Buy & Hold by' if diff > 0 else '📉 B&H beats strategy by'} {abs(diff):.2f}%"
     (st.success if diff > 0 else st.warning)(msg)
 
     st.plotly_chart(
-        create_bh_comparison_chart(r.equity_curve, prices),
+        create_bh_comparison_chart(
+            strategy_curve,
+            benchmark_curve,
+            benchmark_name='Buy & Hold (Long-only)',
+        ),
         use_container_width=True, config=PLOTLY_CONFIG,
     )
 
     ba = calculate_beta_alpha(
-        r.equity_curve.pct_change().dropna(),
-        prices.pct_change().dropna(),
+        strategy_curve.pct_change().dropna(),
+        benchmark_curve.pct_change().dropna(),
     )
     c1, c2, c3 = st.columns(3)
     c1.metric("Beta", f"{ba['beta']:.3f}")

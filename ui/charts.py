@@ -566,19 +566,30 @@ def create_equity_chart(results) -> go.Figure:
     return fig
 
 
-def create_bh_comparison_chart(equity_curve: pd.Series, bh_prices: pd.Series) -> go.Figure:
+def create_bh_comparison_chart(
+    strategy_curve: pd.Series,
+    benchmark_curve: pd.Series,
+    benchmark_name: str = 'Buy & Hold',
+) -> go.Figure:
     """
     Dual normalized equity curve: Strategy vs Buy & Hold.
-    Both series are normalized to 100 at the start of the comparison window
-    (i.e. the first trade's entry date) so the curves share a common baseline.
+    Both series are normalized to 100 at the start of the chosen comparison
+    window so the curves share a common baseline.
     """
-    mask = equity_curve.index >= bh_prices.index[0]
-    strat = equity_curve.loc[mask]
-    if strat.empty or bh_prices.empty:
+    if strategy_curve.empty or benchmark_curve.empty:
+        return go.Figure()
+
+    common_index = strategy_curve.index.intersection(benchmark_curve.index)
+    if len(common_index) == 0:
+        return go.Figure()
+
+    strat = strategy_curve.loc[common_index]
+    bench = benchmark_curve.loc[common_index]
+    if strat.empty or bench.empty or strat.iloc[0] <= 0 or bench.iloc[0] <= 0:
         return go.Figure()
 
     strat_norm = strat / strat.iloc[0] * 100
-    bh_norm = bh_prices / bh_prices.iloc[0] * 100
+    bh_norm = bench / bench.iloc[0] * 100
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -588,14 +599,14 @@ def create_bh_comparison_chart(equity_curve: pd.Series, bh_prices: pd.Series) ->
     ))
     fig.add_trace(go.Scatter(
         x=bh_norm.index, y=bh_norm.values,
-        mode='lines', name='Buy & Hold',
+        mode='lines', name=benchmark_name,
         line=dict(color='#f59e0b', width=2, dash='dot'),
     ))
     fig.add_hline(y=100, line=dict(color='rgba(100,116,139,0.4)', width=1, dash='dash'))
     fig.update_layout(**_chart_layout(
         280, showlegend=True,
         legend=dict(orientation='h', y=1.12, font=dict(size=9)),
-        yaxis_title='Normalized (100 = entry)',
+        yaxis_title='Normalized (100 = window start)',
     ))
     fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
