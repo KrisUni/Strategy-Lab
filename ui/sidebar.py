@@ -152,8 +152,7 @@ def _render_entry_indicators(p: dict) -> None:
     with st.expander("📊 PAMRP", expanded=False):
         p['pamrp_enabled'] = st.toggle("Enable", p['pamrp_enabled'], key="pe")
         if p['pamrp_enabled']:
-            length_label = "Length (shared with PAMRP Exit)" if p.get('pamrp_exit_enabled') else "Length"
-            p['pamrp_length'] = st.slider(length_label, 5, 50, p['pamrp_length'], key="pl")
+            p['pamrp_entry_length'] = st.slider("Length", 5, 50, p['pamrp_entry_length'], key="ple")
             p['pamrp_entry_long'] = st.slider("Entry Long", 5, 50, p['pamrp_entry_long'], key="pel")
             p['pamrp_entry_short'] = st.slider("Entry Short", 50, 95, p['pamrp_entry_short'], key="pes")
 
@@ -277,17 +276,7 @@ def _render_exit_indicators(p: dict) -> None:
     with st.expander("📊 PAMRP Exit", expanded=False):
         p['pamrp_exit_enabled'] = st.toggle("Enable", p['pamrp_exit_enabled'], key="pxe")
         if p['pamrp_exit_enabled']:
-            if p.get('pamrp_enabled'):
-                st.caption(f"Length: {p['pamrp_length']} (shared with PAMRP entry)")
-            else:
-                p['pamrp_length'] = st.slider(
-                    "Length",
-                    5,
-                    50,
-                    p['pamrp_length'],
-                    key="pl",
-                    help="PAMRP period — shared with entry when enabled.",
-                )
+            p['pamrp_exit_length'] = st.slider("Length", 5, 50, p['pamrp_exit_length'], key="pxl_len")
             p['pamrp_exit_long']  = st.slider("Exit Long (overbought)", 50, 100, p['pamrp_exit_long'],  key="pxl_exit")
             p['pamrp_exit_short'] = st.slider("Exit Short (oversold)",  0,   50,  p['pamrp_exit_short'], key="pxs_exit")
 

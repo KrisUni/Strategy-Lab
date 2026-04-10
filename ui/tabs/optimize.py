@@ -22,9 +22,10 @@ from ui.charts import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PINNABLE = {
-    'pamrp_enabled': [('pamrp_length', 'Length'), ('pamrp_entry_long', 'Entry Long'),
+    'pamrp_enabled': [('pamrp_entry_length', 'Length'), ('pamrp_entry_long', 'Entry Long'),
         ('pamrp_entry_short', 'Entry Short')],
-    'pamrp_exit_enabled': [('pamrp_exit_long', 'Exit Long'), ('pamrp_exit_short', 'Exit Short')],
+    'pamrp_exit_enabled': [('pamrp_exit_length', 'Length'), ('pamrp_exit_long', 'Exit Long'),
+        ('pamrp_exit_short', 'Exit Short')],
     'bbwp_enabled': [('bbwp_length', 'Length'), ('bbwp_lookback', 'Lookback'), ('bbwp_sma_length', 'SMA Length'),
         ('bbwp_ma_filter', 'MA Filter'), ('bbwp_threshold_long', 'Thresh Long'), ('bbwp_threshold_short', 'Thresh Short')],
     'adx_enabled': [('adx_length', 'Length'), ('adx_smoothing', 'Smoothing'), ('adx_threshold', 'Threshold')],

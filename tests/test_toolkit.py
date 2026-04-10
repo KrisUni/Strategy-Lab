@@ -103,8 +103,10 @@ class TestStrategy:
         """Signal generator should add required columns"""
         gen = SignalGenerator(default_params)
         result = gen.generate_all_signals(sample_df)
-        
+
         assert 'pamrp' in result.columns
+        assert 'pamrp_entry' in result.columns
+        assert 'pamrp_exit' in result.columns
         assert 'bbwp' in result.columns
         assert 'entry_long' in result.columns
         assert 'entry_short' in result.columns
@@ -131,15 +133,32 @@ class TestStrategy:
         """Params should convert to dict"""
         d = default_params.to_dict()
         assert isinstance(d, dict)
-        assert 'pamrp_length' in d
+        assert 'pamrp_entry_length' in d
+        assert 'pamrp_exit_length' in d
         assert 'stop_loss_enabled' in d
-    
+
     def test_params_from_dict(self):
         """Params should be creatable from dict"""
         d = {'pamrp_length': 30, 'stop_loss_pct_long': 5.0}
         params = StrategyParams.from_dict(d)
-        assert params.pamrp_length == 30
+        assert params.pamrp_entry_length == 30
+        assert params.pamrp_exit_length == 30
         assert params.stop_loss_pct_long == 5.0
+
+    def test_pamrp_entry_and_exit_lengths_are_independent(self, sample_df):
+        """Entry and exit PAMRP should be calculated from separate lookbacks."""
+        params = StrategyParams(
+            pamrp_enabled=True,
+            pamrp_entry_length=10,
+            pamrp_exit_enabled=True,
+            pamrp_exit_length=30,
+        )
+        gen = SignalGenerator(params)
+        result = gen.calculate_indicators(sample_df)
+
+        diff = (result['pamrp_entry'] - result['pamrp_exit']).abs().dropna()
+        assert not diff.empty
+        assert (diff > 1e-9).any()
 
 
 class TestBacktest:

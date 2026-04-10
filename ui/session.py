@@ -18,8 +18,8 @@ def get_default_params() -> Dict[str, Any]:
     return {
         'trade_direction': 'Long Only',
         'position_size_pct': 100.0, 'use_kelly': False, 'kelly_fraction': 0.5,
-        'pamrp_enabled': False, 'pamrp_length': 21, 'pamrp_entry_long': 20, 'pamrp_entry_short': 80,
-        'pamrp_exit_long': 70, 'pamrp_exit_short': 30,
+        'pamrp_enabled': False, 'pamrp_entry_length': 21, 'pamrp_entry_long': 20, 'pamrp_entry_short': 80,
+        'pamrp_exit_length': 21, 'pamrp_exit_long': 70, 'pamrp_exit_short': 30,
         'bbwp_enabled': False, 'bbwp_length': 13, 'bbwp_lookback': 252, 'bbwp_sma_length': 5,
         'bbwp_threshold_long': 50, 'bbwp_threshold_short': 50, 'bbwp_ma_filter': 'disabled',
         'adx_enabled': False, 'adx_length': 14, 'adx_smoothing': 14, 'adx_threshold': 20,
@@ -68,6 +68,11 @@ def init_session_state() -> None:
     for key, default in defaults:
         if key not in st.session_state:
             st.session_state[key] = default
+
+    legacy_pamrp_length = st.session_state.params.get('pamrp_length')
+    if legacy_pamrp_length is not None:
+        st.session_state.params.setdefault('pamrp_entry_length', legacy_pamrp_length)
+        st.session_state.params.setdefault('pamrp_exit_length', legacy_pamrp_length)
 
     # Forward-fill any new keys missing from an older session state
     for k, v in get_default_params().items():

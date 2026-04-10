@@ -22,8 +22,8 @@ from src.strategy import StrategyParams, TradeDirection
 # ─────────────────────────────────────────────────────────────────────────────
 
 PARAM_TO_WIDGET_KEY: Dict[str, str] = {
-    'pamrp_enabled': 'pe', 'pamrp_length': 'pl', 'pamrp_entry_long': 'pel', 'pamrp_entry_short': 'pes',
-    'pamrp_exit_long': 'pxl_exit', 'pamrp_exit_short': 'pxs_exit',
+    'pamrp_enabled': 'pe', 'pamrp_entry_length': 'ple', 'pamrp_entry_long': 'pel', 'pamrp_entry_short': 'pes',
+    'pamrp_exit_length': 'pxl_len', 'pamrp_exit_long': 'pxl_exit', 'pamrp_exit_short': 'pxs_exit',
     'bbwp_enabled': 'be', 'bbwp_length': 'bl', 'bbwp_lookback': 'blb', 'bbwp_sma_length': 'bsma',
     'bbwp_threshold_long': 'btl', 'bbwp_threshold_short': 'bts', 'bbwp_ma_filter': 'bmf',
     'adx_enabled': 'ae', 'adx_length': 'al', 'adx_threshold': 'at',
@@ -56,12 +56,15 @@ def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
         'Short Only': TradeDirection.SHORT_ONLY,
         'Both': TradeDirection.BOTH,
     }
+    legacy_pamrp_length = p.get('pamrp_length', 21)
     return StrategyParams(
         trade_direction=direction_map.get(p.get('trade_direction', 'Long Only'), TradeDirection.LONG_ONLY),
         position_size_pct=p.get('position_size_pct', 100.0),
         use_kelly=p.get('use_kelly', False), kelly_fraction=p.get('kelly_fraction', 0.5),
-        pamrp_enabled=p.get('pamrp_enabled', True), pamrp_length=p.get('pamrp_length', 21),
+        pamrp_enabled=p.get('pamrp_enabled', True),
+        pamrp_entry_length=p.get('pamrp_entry_length', legacy_pamrp_length),
         pamrp_entry_long=p.get('pamrp_entry_long', 20), pamrp_entry_short=p.get('pamrp_entry_short', 80),
+        pamrp_exit_length=p.get('pamrp_exit_length', legacy_pamrp_length),
         pamrp_exit_long=p.get('pamrp_exit_long', 70), pamrp_exit_short=p.get('pamrp_exit_short', 30),
         bbwp_enabled=p.get('bbwp_enabled', True), bbwp_length=p.get('bbwp_length', 13),
         bbwp_lookback=p.get('bbwp_lookback', 252), bbwp_sma_length=p.get('bbwp_sma_length', 5),
@@ -151,6 +154,10 @@ def apply_best_params_callback() -> None:
     if not res:
         return
     bp = res.best_params
+    legacy_pamrp_length = bp.get('pamrp_length')
+    if legacy_pamrp_length is not None:
+        bp.setdefault('pamrp_entry_length', legacy_pamrp_length)
+        bp.setdefault('pamrp_exit_length', legacy_pamrp_length)
     for k, v in bp.items():
         if isinstance(v, TradeDirection) or k == 'trade_direction':
             continue

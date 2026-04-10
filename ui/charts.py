@@ -168,7 +168,10 @@ def create_price_chart_with_trades(
             overlay_inds.append('supertrend')
         if p.get('vwap_enabled') and 'vwap' in idf.columns:
             overlay_inds.append('vwap')
-        if (p.get('pamrp_enabled') or p.get('pamrp_exit_enabled')) and 'pamrp' in idf.columns:
+        if (
+            p.get('pamrp_enabled')
+            or p.get('pamrp_exit_enabled')
+        ) and any(col in idf.columns for col in ('pamrp_entry', 'pamrp_exit', 'pamrp')):
             sub_panel_inds.append('pamrp')
         if (p.get('bbwp_enabled') or p.get('bbwp_exit_enabled')) and 'bbwp' in idf.columns:
             sub_panel_inds.append('bbwp')
@@ -348,13 +351,43 @@ def create_price_chart_with_trades(
             rn = dict(row=row, col=1)
 
             if panel_name == 'pamrp':
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['pamrp'], mode='lines',
-                    line=dict(color='#60a5fa', width=1.2),
-                    name='PAMRP', showlegend=True), **rn)
-                fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
-                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
-                fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
-                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                entry_length = p.get('pamrp_entry_length', p.get('pamrp_length', 21))
+                exit_length = p.get('pamrp_exit_length', p.get('pamrp_length', 21))
+                show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
+                show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
+                same_length = entry_length == exit_length
+
+                if show_entry:
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp_entry'], mode='lines',
+                        line=dict(color='#60a5fa', width=1.2),
+                        name='PAMRP Entry' if show_exit and not same_length else 'PAMRP',
+                        showlegend=True,
+                    ), **rn)
+                elif 'pamrp' in idf.columns:
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp'], mode='lines',
+                        line=dict(color='#60a5fa', width=1.2),
+                        name='PAMRP', showlegend=True,
+                    ), **rn)
+
+                if show_exit and (not show_entry or not same_length):
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp_exit'], mode='lines',
+                        line=dict(color='#f59e0b', width=1.2, dash='dot'),
+                        name='PAMRP Exit', showlegend=True,
+                    ), **rn)
+
+                if p.get('pamrp_enabled'):
+                    fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
+                        line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                    fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
+                        line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                if p.get('pamrp_exit_enabled'):
+                    fig.add_hline(y=p.get('pamrp_exit_long', 70), line_dash='dot',
+                        line_color='rgba(245,158,11,0.7)', row=row, col=1)
+                    fig.add_hline(y=p.get('pamrp_exit_short', 30), line_dash='dot',
+                        line_color='rgba(249,115,22,0.7)', row=row, col=1)
                 fig.update_yaxes(title_text='PAMRP', range=[0, 100],
                     title_font=dict(size=8), row=row, col=1)
 

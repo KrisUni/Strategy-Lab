@@ -49,7 +49,7 @@ def _suppress_warnings():
 
 # Entry-signal params — instability HERE means no reliable edge
 _ENTRY_PARAM_PREFIXES = (
-    'pamrp_length', 'pamrp_entry',
+    'pamrp_entry_length', 'pamrp_entry',
     'bbwp_length', 'bbwp_lookback', 'bbwp_sma', 'bbwp_threshold', 'bbwp_ma',
     'adx_length', 'adx_smoothing', 'adx_threshold',
     'ma_fast_length', 'ma_slow_length', 'ma_type',
@@ -61,6 +61,7 @@ _ENTRY_PARAM_PREFIXES = (
 
 # Exit/risk params — adapting between regimes is EXPECTED, not a red flag
 _EXIT_PARAM_PREFIXES = (
+    'pamrp_exit_length',
     'stop_loss_pct', 'take_profit_pct', 'trailing_stop_pct',
     'atr_length', 'atr_multiplier',
     'time_exit_bars', 'ma_exit_fast', 'ma_exit_slow',
@@ -164,7 +165,7 @@ def _count_active_params(
     Pinned params are subtracted — they consume no trial dimensions.
     """
     dims_per_indicator = {
-        'pamrp_enabled': 5,
+        'pamrp_enabled': 4,
         'bbwp_enabled': 6,
         'adx_enabled': 3,
         'ma_trend_enabled': 3,
@@ -180,7 +181,7 @@ def _count_active_params(
         'time_exit_enabled': 1,
         'ma_exit_enabled': 2,
         'bbwp_exit_enabled': 1,
-        'pamrp_exit_enabled': 0,
+        'pamrp_exit_enabled': 3,
         'stoch_rsi_exit_enabled': 0,
     }
     total = sum(
@@ -381,7 +382,7 @@ class BayesianOptimizer:
         Parameters to hold fixed at their given values during optimization.
         Any param name listed here is NOT passed to trial.suggest_* —
         its value is taken directly from this dict instead.
-        Example: {'pamrp_length': 21, 'bbwp_lookback': 252}
+        Example: {'pamrp_entry_length': 21, 'bbwp_lookback': 252}
         Pinned params reduce the effective search-space dimensionality,
         which improves TPE convergence for the remaining free params.
     """
@@ -475,14 +476,15 @@ class BayesianOptimizer:
         long_or_both  = self.trade_direction in [TradeDirection.LONG_ONLY,  TradeDirection.BOTH]
         short_or_both = self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH]
 
-        pe  = ef.get('pamrp_enabled', False)
-        pl  = p_int('pamrp_length', 10, 30) if (pe or ef.get('pamrp_exit_enabled', False)) else 21
-        pel = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
-        pes = p_int('pamrp_entry_short', 60, 90) if pe and short_or_both else 80
+        pe   = ef.get('pamrp_enabled', False)
+        peln = p_int('pamrp_entry_length', 10, 30) if pe else 21
+        pel  = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
+        pes  = p_int('pamrp_entry_short', 60, 90) if pe and short_or_both else 80
 
-        pxe = ef.get('pamrp_exit_enabled', False)
-        pxl = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
-        pxs = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
+        pxe  = ef.get('pamrp_exit_enabled', False)
+        pxln = p_int('pamrp_exit_length', 10, 30) if pxe else 21
+        pxl  = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
+        pxs  = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
 
         be   = ef.get('bbwp_enabled', True)
         bl   = p_int('bbwp_length',         8,   21) if be else 13
@@ -554,8 +556,11 @@ class BayesianOptimizer:
             pxe = True
 
         return StrategyParams(
-            trade_direction=self.trade_direction, pamrp_enabled=pe, pamrp_length=pl,
+            trade_direction=self.trade_direction,
+            pamrp_enabled=pe,
+            pamrp_entry_length=peln,
             pamrp_entry_long=pel, pamrp_entry_short=pes, pamrp_exit_long=pxl, pamrp_exit_short=pxs,
+            pamrp_exit_length=pxln,
             bbwp_enabled=be, bbwp_length=bl, bbwp_lookback=blb, bbwp_sma_length=bsma,
             bbwp_threshold_long=btl, bbwp_threshold_short=bts, bbwp_ma_filter=bmf,
             adx_enabled=ae, adx_length=al, adx_smoothing=asm, adx_threshold=at,
@@ -922,7 +927,7 @@ def optimize_strategy(
         Keys are StrategyParams field names; values are the fixed values.
         Pinned params are excluded from trial.suggest_* calls, reducing
         search-space dimensionality and improving TPE convergence.
-        Example: {'pamrp_length': 21, 'stop_loss_pct_long': 3.0}
+        Example: {'pamrp_entry_length': 21, 'stop_loss_pct_long': 3.0}
 
     All other parameters are backward compatible with v6.
     """
