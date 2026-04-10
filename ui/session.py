@@ -11,6 +11,8 @@ for every strategy parameter key and its initial value.
 import streamlit as st
 from typing import Any, Dict
 
+from src.backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
+
 
 def get_default_params() -> Dict[str, Any]:
     return {
@@ -59,7 +61,8 @@ def init_session_state() -> None:
         ('backtest_results', None),
         ('optimization_results', None),
         ('capital', 10000),
-        ('commission', 1.0),
+        ('commission', DEFAULT_COMMISSION_PCT),
+        ('slippage', DEFAULT_SLIPPAGE_PCT),
         ('pinned_params', set()),
     ]
     for key, default in defaults:

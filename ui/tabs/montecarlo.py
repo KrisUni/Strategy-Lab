@@ -145,6 +145,7 @@ def render_montecarlo_tab() -> None:
                     min_trades=perm_min,
                     initial_capital=st.session_state.capital,
                     commission_pct=st.session_state.commission,
+                    slippage_pct=st.session_state.slippage,
                     trade_direction=perm_dir,
                     train_pct=0.7,
                     progress_callback=_progress,

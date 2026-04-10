@@ -23,7 +23,12 @@ except ImportError:
     raise ImportError("Install optuna: pip install optuna")
 
 from ..strategy import StrategyParams, TradeDirection
-from ..backtest import BacktestEngine, BacktestResults
+from ..backtest import (
+    BacktestEngine,
+    BacktestResults,
+    DEFAULT_COMMISSION_PCT,
+    DEFAULT_SLIPPAGE_PCT,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,7 +139,8 @@ class OptimizationResult:
     test_value: float = 0.0
     walkforward_folds: List[WalkForwardFold] = field(default_factory=list)
     initial_capital: float = 10000.0
-    commission_pct: float = 0.1
+    commission_pct: float = DEFAULT_COMMISSION_PCT
+    slippage_pct: float = DEFAULT_SLIPPAGE_PCT
     stitched_equity: Optional[pd.Series] = None
     efficiency_ratio: float = 0.0
     param_stability_cv: Dict[str, float] = field(default_factory=dict)
@@ -363,7 +369,7 @@ class BayesianOptimizer:
         BacktestResults attribute to optimize.
     min_trades : int
         Trials producing fewer trades are penalized to -inf.
-    initial_capital, commission_pct : float
+    initial_capital, commission_pct, slippage_pct : float
     trade_direction : str  — 'long_only' | 'short_only' | 'both'
     train_pct : float  — fraction for training in simple (non-WF) mode.
     use_walkforward : bool
@@ -387,7 +393,8 @@ class BayesianOptimizer:
         metric: str = 'sharpe_ratio',
         min_trades: int = 10,
         initial_capital: float = 10000,
-        commission_pct: float = 0.1,
+        commission_pct: float = DEFAULT_COMMISSION_PCT,
+        slippage_pct: float = DEFAULT_SLIPPAGE_PCT,
         trade_direction: str = 'long_only',
         train_pct: float = 0.7,
         use_walkforward: bool = False,
@@ -402,6 +409,7 @@ class BayesianOptimizer:
         self.min_trades = min_trades
         self.initial_capital = initial_capital
         self.commission_pct = commission_pct
+        self.slippage_pct = slippage_pct
         self.train_pct = train_pct
         self.use_walkforward = use_walkforward
         self.n_folds = n_folds
@@ -424,7 +432,12 @@ class BayesianOptimizer:
     # ── Backtest helpers ──────────────────────────────────────────────────────
 
     def _run_backtest(self, params: StrategyParams, df: pd.DataFrame) -> BacktestResults:
-        engine = BacktestEngine(params, self.initial_capital, self.commission_pct)
+        engine = BacktestEngine(
+            params,
+            self.initial_capital,
+            commission_pct=self.commission_pct,
+            slippage_pct=self.slippage_pct,
+        )
         return engine.run(df.copy())
 
     def _get_metric(self, results: BacktestResults) -> float:
@@ -755,6 +768,7 @@ class BayesianOptimizer:
             walkforward_folds=wf_folds,
             initial_capital=self.initial_capital,
             commission_pct=self.commission_pct,
+            slippage_pct=self.slippage_pct,
             stitched_equity=stitched_equity,
             efficiency_ratio=efficiency_ratio,
             param_stability_cv=param_stability_cv,
@@ -792,9 +806,17 @@ class BayesianOptimizer:
             return OptimizationResult(
                 best_params={}, best_value=0.0,
                 full_data_results=BacktestResults(
-                    trades=[], equity_curve=pd.Series(), realized_equity=pd.Series()),
+                    trades=[],
+                    equity_curve=pd.Series(),
+                    realized_equity=pd.Series(),
+                    initial_capital=self.initial_capital,
+                    commission_pct=self.commission_pct,
+                    slippage_pct=self.slippage_pct,
+                ),
                 all_trials=pd.DataFrame(), metric=self.metric,
-                initial_capital=self.initial_capital, commission_pct=self.commission_pct,
+                initial_capital=self.initial_capital,
+                commission_pct=self.commission_pct,
+                slippage_pct=self.slippage_pct,
                 failed_trial_pct=failed_pct, warnings=all_warnings, window_type='simple',
                 pinned_params=self.pinned_params,
             )
@@ -838,6 +860,7 @@ class BayesianOptimizer:
             walkforward_folds=[],
             initial_capital=self.initial_capital,
             commission_pct=self.commission_pct,
+            slippage_pct=self.slippage_pct,
             efficiency_ratio=efficiency_ratio,
             failed_trial_pct=failed_pct,
             warnings=all_warnings,
@@ -871,7 +894,8 @@ def optimize_strategy(
     n_trials: int = 200,
     min_trades: int = 10,
     initial_capital: float = 10000,
-    commission_pct: float = 0.1,
+    commission_pct: float = DEFAULT_COMMISSION_PCT,
+    slippage_pct: float = DEFAULT_SLIPPAGE_PCT,
     trade_direction: str = 'long_only',
     train_pct: float = 0.7,
     use_walkforward: bool = False,
@@ -909,6 +933,7 @@ def optimize_strategy(
         min_trades=min_trades,
         initial_capital=initial_capital,
         commission_pct=commission_pct,
+        slippage_pct=slippage_pct,
         trade_direction=trade_direction,
         train_pct=train_pct,
         use_walkforward=use_walkforward,

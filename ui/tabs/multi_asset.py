@@ -32,6 +32,7 @@ def render_multi_asset_tab() -> None:
                         params_to_strategy(st.session_state.params),
                         st.session_state.capital,
                         st.session_state.commission,
+                        st.session_state.slippage,
                     ).run(df)
                 except Exception as e:
                     st.warning(f"{sym}: {str(e)[:30]}")

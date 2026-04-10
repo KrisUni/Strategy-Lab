@@ -104,6 +104,7 @@ def render_optimize_tab() -> None:
                     df=st.session_state.df.copy(), enabled_filters=ef,
                     metric=opt_metric, n_trials=opt_trials, min_trades=opt_min,
                     initial_capital=st.session_state.capital, commission_pct=st.session_state.commission,
+                    slippage_pct=st.session_state.slippage,
                     trade_direction=opt_dir, train_pct=train_pct / 100, use_walkforward=use_wf,
                     n_folds=n_folds, window_type=window_type, train_window_bars=train_window_bars,
                     show_progress=False, pinned_params=pinned_dict if pinned_dict else None)
@@ -221,4 +222,8 @@ def _render_results() -> None:
 
     st.button("📋 Apply Best Params", on_click=apply_best_params_callback, use_container_width=True)
     if st.session_state.pop('_apply_success', False):
-        st.success(f"✅ Applied! Capital: ${st.session_state.capital:,.0f} | Commission: {st.session_state.commission}%")
+        st.success(
+            f"✅ Applied! Capital: ${st.session_state.capital:,.0f} | "
+            f"Commission: {st.session_state.commission:.2f}% | "
+            f"Slippage: {st.session_state.slippage:.2f}%"
+        )

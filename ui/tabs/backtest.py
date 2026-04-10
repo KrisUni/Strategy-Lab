@@ -24,11 +24,30 @@ from ui.charts import (
 def render_backtest_tab() -> None:
     c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
     st.session_state.capital = c1.number_input("Capital $", 1000, 1000000, st.session_state.capital, 1000)
-    st.session_state.commission = c2.number_input("Comm %", 0.0, 1.0, st.session_state.commission, 0.01)
-    slippage = c3.number_input("Slip %", 0.0, 0.5, 0.0, 0.01)
+    st.session_state.commission = c2.number_input(
+        "Comm / side %",
+        min_value=0.0,
+        value=st.session_state.commission,
+        step=0.01,
+        format="%.2f",
+        help="Applied on entry and exit. A 0.10% commission becomes 0.20% round-trip.",
+    )
+    st.session_state.slippage = c3.number_input(
+        "Slip / fill %",
+        min_value=0.0,
+        value=st.session_state.slippage,
+        step=0.01,
+        format="%.2f",
+        help="Applied on entries and non-gap-aware exits. No hard UI cap.",
+    )
     with c4:
         st.markdown("<br>", unsafe_allow_html=True)
         run = st.button("🚀 Run", type="primary", use_container_width=True)
+
+    st.caption(
+        f"Round-trip commission: {st.session_state.commission * 2:.2f}% | "
+        f"Slippage setting: {st.session_state.slippage:.2f}% per fill"
+    )
 
     if run:
         if st.session_state.df is None:
@@ -39,7 +58,7 @@ def render_backtest_tab() -> None:
                     params_to_strategy(st.session_state.params),
                     st.session_state.capital,
                     st.session_state.commission,
-                    slippage,
+                    st.session_state.slippage,
                 )
                 st.session_state.backtest_results = engine.run(st.session_state.df.copy())
                 st.success(f"✅ {st.session_state.backtest_results.num_trades} trades")

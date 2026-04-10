@@ -164,5 +164,6 @@ def apply_best_params_callback() -> None:
         st.session_state.params['trade_direction'] = dm.get(bp['trade_direction_str'], 'Long Only')
     st.session_state.capital = res.initial_capital
     st.session_state.commission = res.commission_pct
+    st.session_state.slippage = getattr(res, 'slippage_pct', st.session_state.get('slippage', 0.0))
     st.session_state.backtest_results = None
     st.session_state._apply_success = True

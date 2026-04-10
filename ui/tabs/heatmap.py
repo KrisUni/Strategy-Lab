@@ -21,7 +21,7 @@ from ui.charts import _chart_layout
 # Local chart factory
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_heatmap(df, param1, param2, metric, params, capital, commission) -> go.Figure:
+def create_heatmap(df, param1, param2, metric, params, capital, commission, slippage) -> go.Figure:
     ranges = {
         'pamrp_entry_long': list(range(10, 45, 5)),
         'pamrp_exit_long': list(range(50, 95, 5)),
@@ -39,7 +39,12 @@ def create_heatmap(df, param1, param2, metric, params, capital, commission) -> g
             tp[param2] = v2
             try:
                 m[j, i] = getattr(
-                    BacktestEngine(params_to_strategy(tp), capital, commission).run(df.copy()),
+                    BacktestEngine(
+                        params_to_strategy(tp),
+                        capital,
+                        commission,
+                        slippage,
+                    ).run(df.copy()),
                     metric, 0)
             except:
                 m[j, i] = 0
@@ -73,6 +78,7 @@ def render_heatmap_tab() -> None:
                         st.session_state.params,
                         st.session_state.capital,
                         st.session_state.commission,
+                        st.session_state.slippage,
                     ),
                     use_container_width=True,
                 )
