@@ -10,9 +10,7 @@ Fix log (relative to original):
                               was reused for the stochastic min/max window, conflating two
                               independent concepts. Standard platforms expose all four params.
     [FIX-3]  supertrend     : Flipped direction convention to 1=bullish, -1=bearish (industry
-                              standard: TradingView, NinjaTrader). Compatibility alias added —
-                              `supertrend_direction_legacy` returns old convention for callers
-                              not yet migrated.
+                              standard: TradingView, NinjaTrader).
     [FIX-4]  bollinger_width: Added explicit `mult` parameter (default 2.0). Previously hardcoded
                               to 1σ, diverging from standard Bollinger Band definition.
     [FIX-5]  ma             : Now raises ValueError on unknown ma_type instead of silently
@@ -27,9 +25,8 @@ Fix log (relative to original):
     [FIX-10] all multi-series: Added index alignment assertions on all functions that combine
                               two or more input Series.
     [NEW-1]  rsi_hidden_divergence : Hidden bullish/bearish RSI divergence for trend continuation.
-    [NEW-2]  hpdr_bands     : High Probability Distribution Range bands based on log-return
-                              distribution, with per-σ coverage probability semantics.
-    [NEW-3]  hpdr_squeeze_signal: Volatility compression detector built on HPDR sigma.
+    [NEW-2]  hpdr_bands     : High Probability Distribution Range bands using rolling
+                              quantiles, with Normal-equivalent coverage labels.
 """
 
 import pandas as pd
@@ -382,10 +379,8 @@ def supertrend(
         +1 = bullish (price above supertrend line)
         -1 = bearish (price below supertrend line)
 
-    Original code had the inverse (-1=bullish, 1=bearish).
-    A compatibility alias `supertrend_direction_legacy` is available
-    for callers not yet migrated. All internal strategy code has been
-    updated to use the correct convention.
+    Original code had the inverse (-1=bullish, 1=bearish). All internal
+    strategy code now uses the corrected convention.
 
     Parameters
     ----------
@@ -440,24 +435,6 @@ def supertrend(
         pd.Series(supertrend_val, index=close.index),
         pd.Series(direction,      index=close.index),
     )
-
-
-def supertrend_direction_legacy(
-    high: pd.Series,
-    low: pd.Series,
-    close: pd.Series,
-    period: int,
-    multiplier: float,
-) -> Tuple[pd.Series, pd.Series]:
-    """
-    Compatibility alias for supertrend() that returns the OLD direction convention:
-        -1 = bullish, +1 = bearish
-
-    DEPRECATED. Migrate callers to supertrend() with the corrected convention.
-    Will be removed in a future version.
-    """
-    st_line, direction = supertrend(high, low, close, period, multiplier)
-    return st_line, -direction  # flip sign to restore legacy behaviour
 
 
 def vwap(
@@ -630,79 +607,8 @@ def rsi_hidden_divergence(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HPDR BANDS  [NEW-2, NEW-3]
+# HPDR BANDS  [NEW-2]
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def hpdr_bands(
-    close: pd.Series,
-    lookback: int = 252,
-    z_scores: Tuple[float, ...] = (0.5, 1.0, 1.5, 2.0, 2.5),
-) -> Dict[str, pd.Series]:
-    """
-    High Probability Distribution Range (HPDR) Bands.
-
-    Log-normal probability cone anchored to the rolling SMA of close, with
-    width determined by the realised volatility scaled to the lookback horizon.
-
-    WHY SMA AS CENTER
-    ─────────────────
-    Using anchor = close.shift(lookback) is mathematically circular:
-        mu_total = mean(log_returns over lookback) * lookback
-                 = log(close / close.shift(lookback))
-    so current price always equals the center exactly — every bar. The bands
-    would be symmetric around the current price and price never leaves the center.
-
-    Using the rolling SMA as the center breaks this identity: when price trends
-    strongly above the SMA it enters upper (overextended) zones; when it crashes
-    below the SMA it enters lower zones. This is what creates the rainbow cone
-    visual where price genuinely moves through different probability regions.
-
-    Formula
-    ───────
-        r(t)         = ln(close(t) / close(t-1))            [daily log return]
-        μ_daily      = rolling_mean(r, lookback)
-        σ_daily      = rolling_std(r, lookback)
-        σ_period     = σ_daily × √lookback                  [√T horizon scaling]
-
-        center(t)    = SMA(close, lookback)                  [rolling mean price]
-        upper_z(t)   = center × exp(+z × σ_period)
-        lower_z(t)   = center × exp(−z × σ_period)
-
-    Zone colour guide (outer to inner)
-    ───────────────────────────────────
-        ±2.5σ → red      ( ≥99% of expected moves contained)
-        ±2.0σ → orange   (≥95%)
-        ±1.5σ → yellow   (≥87%)
-        ±1.0σ → green    (≥68%)
-        ±0.5σ → teal     (≥38%)  innermost / most likely zone
-
-    Interpretation
-    ──────────────
-        Price deep in red zone → historically overextended vs its own trend.
-        Price near center      → trending in-line with the lookback SMA.
-        Band width wide        → high-volatility regime (bands expand with σ).
-        Band width narrow      → low-volatility / squeeze regime.
-
-    ⚠ Bands are descriptive, not predictive. They show where price IS relative
-    to its own statistical history — not where it will go next.
-
-    ⚠ Fat tails: treat ±2σ coverage as ~90–93% in practice, not 95.4%.
-
-    Parameters
-    ----------
-    close    : close price series with DatetimeIndex
-    lookback : rolling window in bars (252 ≈ 1 trading year on daily data)
-    z_scores : band levels (each produces an upper/lower pair)
-
-    Returns
-    -------
-    dict with keys:
-        'center'        → rolling SMA of close (band midline)
-        'mu_return'     → rolling mean of daily log returns
-        'sigma_return'  → rolling std  of daily log returns
-        'upper_{z:.1f}' → upper band for each z-score
-        'lower_{z:.1f}' → lower band for each z-score
-    """
 def hpdr_bands(
     close: pd.Series,
     lookback: int = 252,
@@ -776,30 +682,3 @@ def hpdr_bands(
         result[f'lower_{label}'] = close.rolling(window=lookback).quantile(q_low)
 
     return result
-
-
-def hpdr_squeeze_signal(close: pd.Series, lookback: int = 252) -> pd.Series:
-    """
-    HPDR Volatility Squeeze Signal.
-
-    Ranks the current realised volatility (σ of log returns) against its
-    own rolling history using percentile rank. This identifies periods of
-    volatility compression that often precede expansion.
-
-    Interpretation
-    ──────────────
-        < 20  →  compression zone  (squeeze — potential breakout setup)
-        > 80  →  expansion zone    (elevated volatility — bands widening)
-
-    Parameters
-    ----------
-    close    : close price series
-    lookback : lookback for σ estimation AND for percentile ranking
-
-    Returns
-    -------
-    pd.Series in [0, 100] — percentile rank of current σ vs its own history
-    """
-    log_ret = np.log(close / close.shift(1))
-    sigma   = log_ret.rolling(window=lookback).std()
-    return percentile_rank(sigma, lookback)
