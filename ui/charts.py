@@ -28,6 +28,7 @@ from src.indicators import (
     hpdr_bands,
     rsi as compute_rsi,
 )
+from ui.state_migration import migrate_legacy_pamrp_params
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +155,7 @@ def create_price_chart_with_trades(
 
     Y-axis of the price panel is always locked to the actual price range.
     """
-    p = params or {}
+    p = migrate_legacy_pamrp_params(params or {})
     idf = indicator_df
 
     # ── Decide which indicators to display ───────────────────────────────────
@@ -351,8 +352,8 @@ def create_price_chart_with_trades(
             rn = dict(row=row, col=1)
 
             if panel_name == 'pamrp':
-                entry_length = p.get('pamrp_entry_length', p.get('pamrp_length', 21))
-                exit_length = p.get('pamrp_exit_length', p.get('pamrp_length', 21))
+                entry_length = p.get('pamrp_entry_length', 21)
+                exit_length = p.get('pamrp_exit_length', 21)
                 show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
                 show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
                 same_length = entry_length == exit_length

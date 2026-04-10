@@ -5,9 +5,9 @@ Backtest Module - v1.0.0
 
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
-from ..strategy import StrategyParams, SignalGenerator, TradeDirection
+from ..strategy import StrategyParams, SignalGenerator
 
 DEFAULT_COMMISSION_PCT = 0.1
 DEFAULT_SLIPPAGE_PCT = 0.0

@@ -12,6 +12,7 @@ import streamlit as st
 from typing import Any, Dict
 
 from src.backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
+from ui.state_migration import migrate_legacy_pamrp_params, migrate_legacy_pamrp_pins
 
 
 def get_default_params() -> Dict[str, Any]:
@@ -69,10 +70,10 @@ def init_session_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = default
 
-    legacy_pamrp_length = st.session_state.params.get('pamrp_length')
-    if legacy_pamrp_length is not None:
-        st.session_state.params.setdefault('pamrp_entry_length', legacy_pamrp_length)
-        st.session_state.params.setdefault('pamrp_exit_length', legacy_pamrp_length)
+    st.session_state.params = migrate_legacy_pamrp_params(st.session_state.params)
+    st.session_state.pinned_params = migrate_legacy_pamrp_pins(
+        st.session_state.get('pinned_params', set())
+    )
 
     # Forward-fill any new keys missing from an older session state
     for k, v in get_default_params().items():

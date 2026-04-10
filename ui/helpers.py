@@ -15,6 +15,7 @@ import streamlit as st
 from typing import Dict, Any
 
 from src.strategy import StrategyParams, TradeDirection
+from ui.state_migration import migrate_legacy_pamrp_params
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,20 +52,20 @@ PARAM_TO_WIDGET_KEY: Dict[str, str] = {
 
 def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
     """Convert the flat session-state params dict into a typed StrategyParams object."""
+    p = migrate_legacy_pamrp_params(p)
     direction_map = {
         'Long Only': TradeDirection.LONG_ONLY,
         'Short Only': TradeDirection.SHORT_ONLY,
         'Both': TradeDirection.BOTH,
     }
-    legacy_pamrp_length = p.get('pamrp_length', 21)
     return StrategyParams(
         trade_direction=direction_map.get(p.get('trade_direction', 'Long Only'), TradeDirection.LONG_ONLY),
         position_size_pct=p.get('position_size_pct', 100.0),
         use_kelly=p.get('use_kelly', False), kelly_fraction=p.get('kelly_fraction', 0.5),
         pamrp_enabled=p.get('pamrp_enabled', True),
-        pamrp_entry_length=p.get('pamrp_entry_length', legacy_pamrp_length),
+        pamrp_entry_length=p.get('pamrp_entry_length', 21),
         pamrp_entry_long=p.get('pamrp_entry_long', 20), pamrp_entry_short=p.get('pamrp_entry_short', 80),
-        pamrp_exit_length=p.get('pamrp_exit_length', legacy_pamrp_length),
+        pamrp_exit_length=p.get('pamrp_exit_length', 21),
         pamrp_exit_long=p.get('pamrp_exit_long', 70), pamrp_exit_short=p.get('pamrp_exit_short', 30),
         bbwp_enabled=p.get('bbwp_enabled', True), bbwp_length=p.get('bbwp_length', 13),
         bbwp_lookback=p.get('bbwp_lookback', 252), bbwp_sma_length=p.get('bbwp_sma_length', 5),
@@ -153,11 +154,7 @@ def apply_best_params_callback() -> None:
     res = st.session_state.get('optimization_results')
     if not res:
         return
-    bp = res.best_params
-    legacy_pamrp_length = bp.get('pamrp_length')
-    if legacy_pamrp_length is not None:
-        bp.setdefault('pamrp_entry_length', legacy_pamrp_length)
-        bp.setdefault('pamrp_exit_length', legacy_pamrp_length)
+    bp = migrate_legacy_pamrp_params(res.best_params)
     for k, v in bp.items():
         if isinstance(v, TradeDirection) or k == 'trade_direction':
             continue

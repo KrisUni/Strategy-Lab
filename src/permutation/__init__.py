@@ -21,7 +21,7 @@ If p < 0.05, we reject the null — the strategy's edge is unlikely due to chanc
 import numpy as np
 import pandas as pd
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 
 from ..backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT

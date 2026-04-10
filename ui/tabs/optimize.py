@@ -10,6 +10,7 @@ import streamlit as st
 from src.optimize import optimize_strategy
 from src.strategy import TradeDirection
 from ui.helpers import get_active_filters_display, apply_best_params_callback
+from ui.state_migration import migrate_legacy_pamrp_pins
 from ui.charts import (
     create_walkforward_chart,
     create_stitched_equity_chart,
@@ -96,9 +97,12 @@ def render_optimize_tab() -> None:
         if st.session_state.df is None:
             st.warning("Load data first!")
         else:
+            normalized_pins = migrate_legacy_pamrp_pins(st.session_state.pinned_params)
+            if normalized_pins != st.session_state.pinned_params:
+                st.session_state.pinned_params = normalized_pins
             ef = {k: v for k, v in st.session_state.params.items() if k.endswith('_enabled')}
             pinned_dict = {k: st.session_state.params[k]
-                           for k in st.session_state.pinned_params
+                           for k in normalized_pins
                            if k in st.session_state.params}
             with st.spinner("Optimizing..."):
                 res = optimize_strategy(
@@ -125,9 +129,10 @@ def _render_pin_expander() -> None:
         for ind_key, params_list in _PINNABLE.items()
         if st.session_state.params.get(ind_key, False)
     ]
-    pinned_set: set = st.session_state.pinned_params
+    pinned_set: set = migrate_legacy_pamrp_pins(st.session_state.pinned_params)
 
     if not enabled_pinnable:
+        st.session_state.pinned_params = pinned_set
         return
 
     with st.expander("🔒 Pin Parameters (hold fixed during optimization)", expanded=False):
