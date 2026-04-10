@@ -12,6 +12,8 @@ import streamlit as st
 from datetime import datetime, timedelta
 
 from src.data import fetch_yfinance, generate_sample_data, load_csv
+from ui.state_sync import sync_following_session_value
+from ui.trade_direction import SIDEBAR_TRADE_DIRECTION_OPTIONS
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -24,7 +26,6 @@ _INTERVAL_MAX_DAYS = {
 }
 
 INTERVALS = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
-TRADE_DIRECTION_OPTIONS = ["Long Only", "Short Only", "Both"]
 ENTRY_CONFLICT_OPTIONS = ["skip", "prefer_long", "prefer_short"]
 
 
@@ -48,7 +49,7 @@ def render_sidebar() -> None:
         _sync_trade_direction_widget(p.get('trade_direction', 'Long Only'))
         p['trade_direction'] = st.selectbox(
             "Direction",
-            TRADE_DIRECTION_OPTIONS,
+            SIDEBAR_TRADE_DIRECTION_OPTIONS,
             key="tdir",
         )
         p['entry_conflict_mode'] = st.selectbox(
@@ -73,21 +74,10 @@ def render_sidebar() -> None:
 
 
 def _sync_trade_direction_widget(current_direction: str) -> None:
-    if current_direction not in TRADE_DIRECTION_OPTIONS:
+    if current_direction not in SIDEBAR_TRADE_DIRECTION_OPTIONS:
         current_direction = "Long Only"
 
-    previous_strategy_direction = st.session_state.get('_last_sidebar_trade_direction')
-
-    if 'tdir' not in st.session_state:
-        st.session_state.tdir = current_direction
-    elif (
-        previous_strategy_direction is not None
-        and current_direction != previous_strategy_direction
-        and st.session_state.tdir == previous_strategy_direction
-    ):
-        st.session_state.tdir = current_direction
-
-    st.session_state._last_sidebar_trade_direction = current_direction
+    sync_following_session_value('tdir', current_direction, '_last_sidebar_trade_direction')
 
 
 # ─────────────────────────────────────────────────────────────────────────────

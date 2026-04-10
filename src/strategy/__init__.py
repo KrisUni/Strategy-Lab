@@ -46,6 +46,59 @@ class EntryConflictMode(str, Enum):
     PREFER_SHORT = "prefer_short"
 
 
+def coerce_trade_direction(
+    value: Any,
+    default: TradeDirection = TradeDirection.LONG_ONLY,
+) -> TradeDirection:
+    if isinstance(value, TradeDirection):
+        return value
+    if isinstance(value, str):
+        try:
+            return TradeDirection(value.lower())
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_condition_operator(
+    value: Any,
+    default: ConditionOperator = ConditionOperator.AND,
+) -> ConditionOperator:
+    if isinstance(value, ConditionOperator):
+        return value
+    if isinstance(value, str):
+        try:
+            return ConditionOperator(value.lower())
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_entry_conflict_mode(
+    value: Any,
+    default: EntryConflictMode = EntryConflictMode.SKIP,
+) -> EntryConflictMode:
+    if isinstance(value, EntryConflictMode):
+        return value
+    if isinstance(value, str):
+        try:
+            return EntryConflictMode(value.lower())
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'1', 'true', 'yes', 'on'}:
+            return True
+        if normalized in {'0', 'false', 'no', 'off'}:
+            return False
+        return default
+    return bool(value) if value is not None else default
+
+
 @dataclass
 class StrategyParams:
     """All strategy parameters — fully exposed."""
@@ -173,14 +226,18 @@ class StrategyParams:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> 'StrategyParams':
         d = d.copy()
-        if 'trade_direction' in d and isinstance(d['trade_direction'], str):
-            d['trade_direction'] = TradeDirection(d['trade_direction'])
-        if 'entry_operator' in d and isinstance(d['entry_operator'], str):
-            d['entry_operator'] = ConditionOperator(d['entry_operator'].lower())
-        if 'exit_operator' in d and isinstance(d['exit_operator'], str):
-            d['exit_operator'] = ConditionOperator(d['exit_operator'].lower())
-        if 'entry_conflict_mode' in d and isinstance(d['entry_conflict_mode'], str):
-            d['entry_conflict_mode'] = EntryConflictMode(d['entry_conflict_mode'].lower())
+        if 'trade_direction' in d:
+            d['trade_direction'] = coerce_trade_direction(d['trade_direction'])
+        if 'entry_operator' in d:
+            d['entry_operator'] = coerce_condition_operator(d['entry_operator'], ConditionOperator.AND)
+        if 'exit_operator' in d:
+            d['exit_operator'] = coerce_condition_operator(d['exit_operator'], ConditionOperator.OR)
+        if 'entry_conflict_mode' in d:
+            d['entry_conflict_mode'] = coerce_entry_conflict_mode(d['entry_conflict_mode'])
+        if 'allow_same_bar_exit' in d:
+            d['allow_same_bar_exit'] = coerce_bool(d['allow_same_bar_exit'], True)
+        if 'allow_same_bar_reversal' in d:
+            d['allow_same_bar_reversal'] = coerce_bool(d['allow_same_bar_reversal'], False)
         legacy_pamrp_length = d.pop('pamrp_length', None)
         if legacy_pamrp_length is not None:
             d.setdefault('pamrp_entry_length', legacy_pamrp_length)

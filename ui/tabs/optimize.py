@@ -11,6 +11,8 @@ from src.optimize import optimize_strategy
 from src.strategy import TradeDirection
 from ui.helpers import get_active_filters_display, apply_best_params_callback
 from ui.state_migration import migrate_legacy_pamrp_pins
+from ui.state_sync import sync_following_session_value
+from ui.trade_direction import OPT_DIRECTION_OPTIONS, format_opt_direction, sidebar_direction_to_opt
 from ui.charts import (
     create_walkforward_chart,
     create_stitched_equity_chart,
@@ -54,19 +56,6 @@ _INDICATOR_LABELS = {
     'time_exit_enabled': 'Time Exit', 'ma_exit_enabled': 'MA Exit', 'bbwp_exit_enabled': 'BBWP Exit',
 }
 
-_SIDEBAR_TO_OPT_DIRECTION = {
-    'Long Only': 'long_only',
-    'Short Only': 'short_only',
-    'Both': 'both',
-}
-
-_OPT_DIRECTION_LABELS = {
-    'long_only': 'Long Only',
-    'short_only': 'Short Only',
-    'both': 'Both',
-}
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Public entry point
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,12 +66,16 @@ def render_optimize_tab() -> None:
     _sync_opt_direction_with_strategy()
 
     c1, c2, c3, c4 = st.columns(4)
-    opt_metric = c1.selectbox("Metric", ["profit_factor", "sharpe_ratio", "total_return_pct", "sortino_ratio"])
+    opt_metric = c1.selectbox(
+        "Metric",
+        ["profit_factor", "sharpe_ratio", "total_return_pct", "sortino_ratio"],
+        key="opt_metric",
+    )
     opt_dir = c2.selectbox(
         "Direction",
-        ["long_only", "short_only", "both"],
+        OPT_DIRECTION_OPTIONS,
         key="opt_dir",
-        format_func=lambda value: _OPT_DIRECTION_LABELS[value],
+        format_func=format_opt_direction,
         help="Defaults to the current strategy direction. Change it only when you want optimization to target a different direction.",
     )
     opt_trials = c3.slider("Trials", 50, 1500, 500)
@@ -189,18 +182,10 @@ def _render_pin_expander() -> None:
 
 
 def _sync_opt_direction_with_strategy() -> None:
-    current_strategy_direction = _SIDEBAR_TO_OPT_DIRECTION.get(
-        st.session_state.params.get('trade_direction', 'Long Only'),
-        'long_only',
+    current_strategy_direction = sidebar_direction_to_opt(
+        st.session_state.params.get('trade_direction', 'Long Only')
     )
-    previous_strategy_direction = st.session_state.get('_last_strategy_trade_direction')
-
-    if 'opt_dir' not in st.session_state:
-        st.session_state.opt_dir = current_strategy_direction
-    elif previous_strategy_direction is not None and st.session_state.opt_dir == previous_strategy_direction:
-        st.session_state.opt_dir = current_strategy_direction
-
-    st.session_state._last_strategy_trade_direction = current_strategy_direction
+    sync_following_session_value('opt_dir', current_strategy_direction, '_last_strategy_trade_direction')
 
 
 def _render_results() -> None:
