@@ -196,6 +196,9 @@ def apply_styles() -> None:
     .stDateInput button {
         color: var(--text-secondary) !important;
     }
+    .stNumberInput [data-testid="InputInstructions"] {
+        display: none !important;
+    }
     div[data-baseweb="popover"] {
         background: rgba(10, 16, 26, 0.98) !important;
         border: 1px solid var(--border-strong) !important;
