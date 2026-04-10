@@ -5,9 +5,12 @@ Backtest Module - v1.0.0
 
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
-from ..strategy import StrategyParams, SignalGenerator, TradeDirection
+from ..strategy import StrategyParams, SignalGenerator
+
+DEFAULT_COMMISSION_PCT = 0.1
+DEFAULT_SLIPPAGE_PCT = 0.0
 
 
 @dataclass
@@ -63,7 +66,8 @@ class BacktestResults:
     avg_mae: float = 0.0
     avg_mfe: float = 0.0
     initial_capital: float = 10000.0
-    commission_pct: float = 0.1
+    commission_pct: float = DEFAULT_COMMISSION_PCT
+    slippage_pct: float = DEFAULT_SLIPPAGE_PCT
     bars_per_year: int = 252
 
 
@@ -119,8 +123,8 @@ class BacktestEngine:
         self,
         params: StrategyParams,
         initial_capital: float = 10000,
-        commission_pct: float = 0.1,
-        slippage_pct: float = 0.0
+        commission_pct: float = DEFAULT_COMMISSION_PCT,
+        slippage_pct: float = DEFAULT_SLIPPAGE_PCT
     ):
         self.params = params
         self.initial_capital = initial_capital
@@ -641,6 +645,7 @@ class BacktestEngine:
                 realized_equity=realized_equity,
                 initial_capital=self.initial_capital,
                 commission_pct=self.commission_pct,
+                slippage_pct=self.slippage_pct,
                 bars_per_year=bars_per_year,
             )
 
@@ -791,5 +796,6 @@ class BacktestEngine:
             avg_mfe=avg_mfe,
             initial_capital=self.initial_capital,
             commission_pct=self.commission_pct,
+            slippage_pct=self.slippage_pct,
             bars_per_year=bars_per_year,
         )

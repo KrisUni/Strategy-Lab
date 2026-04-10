@@ -10,6 +10,7 @@ import streamlit as st
 from src.optimize import optimize_strategy
 from src.strategy import TradeDirection
 from ui.helpers import get_active_filters_display, apply_best_params_callback
+from ui.state_migration import migrate_legacy_pamrp_pins
 from ui.charts import (
     create_walkforward_chart,
     create_stitched_equity_chart,
@@ -22,9 +23,10 @@ from ui.charts import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PINNABLE = {
-    'pamrp_enabled': [('pamrp_length', 'Length'), ('pamrp_entry_long', 'Entry Long'),
+    'pamrp_enabled': [('pamrp_entry_length', 'Length'), ('pamrp_entry_long', 'Entry Long'),
         ('pamrp_entry_short', 'Entry Short')],
-    'pamrp_exit_enabled': [('pamrp_exit_long', 'Exit Long'), ('pamrp_exit_short', 'Exit Short')],
+    'pamrp_exit_enabled': [('pamrp_exit_length', 'Length'), ('pamrp_exit_long', 'Exit Long'),
+        ('pamrp_exit_short', 'Exit Short')],
     'bbwp_enabled': [('bbwp_length', 'Length'), ('bbwp_lookback', 'Lookback'), ('bbwp_sma_length', 'SMA Length'),
         ('bbwp_ma_filter', 'MA Filter'), ('bbwp_threshold_long', 'Thresh Long'), ('bbwp_threshold_short', 'Thresh Short')],
     'adx_enabled': [('adx_length', 'Length'), ('adx_smoothing', 'Smoothing'), ('adx_threshold', 'Threshold')],
@@ -95,15 +97,19 @@ def render_optimize_tab() -> None:
         if st.session_state.df is None:
             st.warning("Load data first!")
         else:
+            normalized_pins = migrate_legacy_pamrp_pins(st.session_state.pinned_params)
+            if normalized_pins != st.session_state.pinned_params:
+                st.session_state.pinned_params = normalized_pins
             ef = {k: v for k, v in st.session_state.params.items() if k.endswith('_enabled')}
             pinned_dict = {k: st.session_state.params[k]
-                           for k in st.session_state.pinned_params
+                           for k in normalized_pins
                            if k in st.session_state.params}
             with st.spinner("Optimizing..."):
                 res = optimize_strategy(
                     df=st.session_state.df.copy(), enabled_filters=ef,
                     metric=opt_metric, n_trials=opt_trials, min_trades=opt_min,
                     initial_capital=st.session_state.capital, commission_pct=st.session_state.commission,
+                    slippage_pct=st.session_state.slippage,
                     trade_direction=opt_dir, train_pct=train_pct / 100, use_walkforward=use_wf,
                     n_folds=n_folds, window_type=window_type, train_window_bars=train_window_bars,
                     show_progress=False, pinned_params=pinned_dict if pinned_dict else None)
@@ -123,9 +129,10 @@ def _render_pin_expander() -> None:
         for ind_key, params_list in _PINNABLE.items()
         if st.session_state.params.get(ind_key, False)
     ]
-    pinned_set: set = st.session_state.pinned_params
+    pinned_set: set = migrate_legacy_pamrp_pins(st.session_state.pinned_params)
 
     if not enabled_pinnable:
+        st.session_state.pinned_params = pinned_set
         return
 
     with st.expander("🔒 Pin Parameters (hold fixed during optimization)", expanded=False):
@@ -221,4 +228,8 @@ def _render_results() -> None:
 
     st.button("📋 Apply Best Params", on_click=apply_best_params_callback, use_container_width=True)
     if st.session_state.pop('_apply_success', False):
-        st.success(f"✅ Applied! Capital: ${st.session_state.capital:,.0f} | Commission: {st.session_state.commission}%")
+        st.success(
+            f"✅ Applied! Capital: ${st.session_state.capital:,.0f} | "
+            f"Commission: {st.session_state.commission:.2f}% | "
+            f"Slippage: {st.session_state.slippage:.2f}%"
+        )

@@ -28,6 +28,7 @@ from src.indicators import (
     hpdr_bands,
     rsi as compute_rsi,
 )
+from ui.state_migration import migrate_legacy_pamrp_params
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +155,7 @@ def create_price_chart_with_trades(
 
     Y-axis of the price panel is always locked to the actual price range.
     """
-    p = params or {}
+    p = migrate_legacy_pamrp_params(params or {})
     idf = indicator_df
 
     # ── Decide which indicators to display ───────────────────────────────────
@@ -168,7 +169,10 @@ def create_price_chart_with_trades(
             overlay_inds.append('supertrend')
         if p.get('vwap_enabled') and 'vwap' in idf.columns:
             overlay_inds.append('vwap')
-        if (p.get('pamrp_enabled') or p.get('pamrp_exit_enabled')) and 'pamrp' in idf.columns:
+        if (
+            p.get('pamrp_enabled')
+            or p.get('pamrp_exit_enabled')
+        ) and any(col in idf.columns for col in ('pamrp_entry', 'pamrp_exit', 'pamrp')):
             sub_panel_inds.append('pamrp')
         if (p.get('bbwp_enabled') or p.get('bbwp_exit_enabled')) and 'bbwp' in idf.columns:
             sub_panel_inds.append('bbwp')
@@ -348,13 +352,43 @@ def create_price_chart_with_trades(
             rn = dict(row=row, col=1)
 
             if panel_name == 'pamrp':
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['pamrp'], mode='lines',
-                    line=dict(color='#60a5fa', width=1.2),
-                    name='PAMRP', showlegend=True), **rn)
-                fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
-                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
-                fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
-                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                entry_length = p.get('pamrp_entry_length', 21)
+                exit_length = p.get('pamrp_exit_length', 21)
+                show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
+                show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
+                same_length = entry_length == exit_length
+
+                if show_entry:
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp_entry'], mode='lines',
+                        line=dict(color='#60a5fa', width=1.2),
+                        name='PAMRP Entry' if show_exit and not same_length else 'PAMRP',
+                        showlegend=True,
+                    ), **rn)
+                elif 'pamrp' in idf.columns:
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp'], mode='lines',
+                        line=dict(color='#60a5fa', width=1.2),
+                        name='PAMRP', showlegend=True,
+                    ), **rn)
+
+                if show_exit and (not show_entry or not same_length):
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp_exit'], mode='lines',
+                        line=dict(color='#f59e0b', width=1.2, dash='dot'),
+                        name='PAMRP Exit', showlegend=True,
+                    ), **rn)
+
+                if p.get('pamrp_enabled'):
+                    fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
+                        line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                    fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
+                        line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                if p.get('pamrp_exit_enabled'):
+                    fig.add_hline(y=p.get('pamrp_exit_long', 70), line_dash='dot',
+                        line_color='rgba(245,158,11,0.7)', row=row, col=1)
+                    fig.add_hline(y=p.get('pamrp_exit_short', 30), line_dash='dot',
+                        line_color='rgba(249,115,22,0.7)', row=row, col=1)
                 fig.update_yaxes(title_text='PAMRP', range=[0, 100],
                     title_font=dict(size=8), row=row, col=1)
 
@@ -566,19 +600,30 @@ def create_equity_chart(results) -> go.Figure:
     return fig
 
 
-def create_bh_comparison_chart(equity_curve: pd.Series, bh_prices: pd.Series) -> go.Figure:
+def create_bh_comparison_chart(
+    strategy_curve: pd.Series,
+    benchmark_curve: pd.Series,
+    benchmark_name: str = 'Buy & Hold',
+) -> go.Figure:
     """
     Dual normalized equity curve: Strategy vs Buy & Hold.
-    Both series are normalized to 100 at the start of the comparison window
-    (i.e. the first trade's entry date) so the curves share a common baseline.
+    Both series are normalized to 100 at the start of the chosen comparison
+    window so the curves share a common baseline.
     """
-    mask = equity_curve.index >= bh_prices.index[0]
-    strat = equity_curve.loc[mask]
-    if strat.empty or bh_prices.empty:
+    if strategy_curve.empty or benchmark_curve.empty:
+        return go.Figure()
+
+    common_index = strategy_curve.index.intersection(benchmark_curve.index)
+    if len(common_index) == 0:
+        return go.Figure()
+
+    strat = strategy_curve.loc[common_index]
+    bench = benchmark_curve.loc[common_index]
+    if strat.empty or bench.empty or strat.iloc[0] <= 0 or bench.iloc[0] <= 0:
         return go.Figure()
 
     strat_norm = strat / strat.iloc[0] * 100
-    bh_norm = bh_prices / bh_prices.iloc[0] * 100
+    bh_norm = bench / bench.iloc[0] * 100
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -588,14 +633,14 @@ def create_bh_comparison_chart(equity_curve: pd.Series, bh_prices: pd.Series) ->
     ))
     fig.add_trace(go.Scatter(
         x=bh_norm.index, y=bh_norm.values,
-        mode='lines', name='Buy & Hold',
+        mode='lines', name=benchmark_name,
         line=dict(color='#f59e0b', width=2, dash='dot'),
     ))
     fig.add_hline(y=100, line=dict(color='rgba(100,116,139,0.4)', width=1, dash='dash'))
     fig.update_layout(**_chart_layout(
         280, showlegend=True,
         legend=dict(orientation='h', y=1.12, font=dict(size=9)),
-        yaxis_title='Normalized (100 = entry)',
+        yaxis_title='Normalized (100 = window start)',
     ))
     fig.update_xaxes(rangeselector=dict(buttons=_RANGE_BUTTONS_SHORT, **_RANGE_SELECTOR_STYLE))
     fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')

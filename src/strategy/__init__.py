@@ -49,9 +49,10 @@ class StrategyParams:
 
     # PAMRP
     pamrp_enabled: bool = True
-    pamrp_length: int = 21
+    pamrp_entry_length: int = 21
     pamrp_entry_long: int = 20
     pamrp_entry_short: int = 80
+    pamrp_exit_length: int = 21
     pamrp_exit_long: int = 70
     pamrp_exit_short: int = 30
 
@@ -159,6 +160,10 @@ class StrategyParams:
         d = d.copy()
         if 'trade_direction' in d and isinstance(d['trade_direction'], str):
             d['trade_direction'] = TradeDirection(d['trade_direction'])
+        legacy_pamrp_length = d.pop('pamrp_length', None)
+        if legacy_pamrp_length is not None:
+            d.setdefault('pamrp_entry_length', legacy_pamrp_length)
+            d.setdefault('pamrp_exit_length', legacy_pamrp_length)
         valid_fields = set(cls.__dataclass_fields__.keys())
         return cls(**{k: v for k, v in d.items() if k in valid_fields})
 
@@ -173,9 +178,27 @@ class SignalGenerator:
         df = df.copy()
         p  = self.params
 
-        # PAMRP
-        df['pamrp'] = pamrp(df['high'], df['low'], df['close'], p.pamrp_length) \
-            if (p.pamrp_enabled or p.pamrp_exit_enabled) else 50.0
+        # PAMRP entry/exit can use different lookbacks.
+        if p.pamrp_enabled:
+            df['pamrp_entry'] = pamrp(df['high'], df['low'], df['close'], p.pamrp_entry_length)
+        else:
+            df['pamrp_entry'] = 50.0
+
+        if p.pamrp_exit_enabled:
+            if p.pamrp_enabled and p.pamrp_entry_length == p.pamrp_exit_length:
+                df['pamrp_exit'] = df['pamrp_entry']
+            else:
+                df['pamrp_exit'] = pamrp(df['high'], df['low'], df['close'], p.pamrp_exit_length)
+        else:
+            df['pamrp_exit'] = 50.0
+
+        # Keep the legacy column for callers that still expect one PAMRP series.
+        if p.pamrp_enabled:
+            df['pamrp'] = df['pamrp_entry']
+        elif p.pamrp_exit_enabled:
+            df['pamrp'] = df['pamrp_exit']
+        else:
+            df['pamrp'] = 50.0
 
         # BBWP
         if p.bbwp_enabled or p.bbwp_exit_enabled:
@@ -255,8 +278,8 @@ class SignalGenerator:
 
         if p.pamrp_enabled:
             has_any_filter = True
-            long_signal  = long_signal  & (df['pamrp'] < p.pamrp_entry_long)
-            short_signal = short_signal & (df['pamrp'] > p.pamrp_entry_short)
+            long_signal  = long_signal  & (df['pamrp_entry'] < p.pamrp_entry_long)
+            short_signal = short_signal & (df['pamrp_entry'] > p.pamrp_entry_short)
 
         if p.bbwp_enabled:
             has_any_filter = True
@@ -343,8 +366,8 @@ class SignalGenerator:
         exit_short = pd.Series(False, index=df.index)
 
         if p.pamrp_exit_enabled:
-            exit_long  = exit_long  | (df['pamrp'] > p.pamrp_exit_long)
-            exit_short = exit_short | (df['pamrp'] < p.pamrp_exit_short)
+            exit_long  = exit_long  | (df['pamrp_exit'] > p.pamrp_exit_long)
+            exit_short = exit_short | (df['pamrp_exit'] < p.pamrp_exit_short)
 
         if p.stoch_rsi_exit_enabled and 'stoch_k' in df.columns:
             exit_long  = exit_long  | (df['stoch_k'] > p.stoch_rsi_overbought)

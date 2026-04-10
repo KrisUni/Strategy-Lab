@@ -11,13 +11,16 @@ for every strategy parameter key and its initial value.
 import streamlit as st
 from typing import Any, Dict
 
+from src.backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
+from ui.state_migration import migrate_legacy_pamrp_params, migrate_legacy_pamrp_pins
+
 
 def get_default_params() -> Dict[str, Any]:
     return {
         'trade_direction': 'Long Only',
         'position_size_pct': 100.0, 'use_kelly': False, 'kelly_fraction': 0.5,
-        'pamrp_enabled': False, 'pamrp_length': 21, 'pamrp_entry_long': 20, 'pamrp_entry_short': 80,
-        'pamrp_exit_long': 70, 'pamrp_exit_short': 30,
+        'pamrp_enabled': False, 'pamrp_entry_length': 21, 'pamrp_entry_long': 20, 'pamrp_entry_short': 80,
+        'pamrp_exit_length': 21, 'pamrp_exit_long': 70, 'pamrp_exit_short': 30,
         'bbwp_enabled': False, 'bbwp_length': 13, 'bbwp_lookback': 252, 'bbwp_sma_length': 5,
         'bbwp_threshold_long': 50, 'bbwp_threshold_short': 50, 'bbwp_ma_filter': 'disabled',
         'adx_enabled': False, 'adx_length': 14, 'adx_smoothing': 14, 'adx_threshold': 20,
@@ -59,12 +62,18 @@ def init_session_state() -> None:
         ('backtest_results', None),
         ('optimization_results', None),
         ('capital', 10000),
-        ('commission', 1.0),
+        ('commission', DEFAULT_COMMISSION_PCT),
+        ('slippage', DEFAULT_SLIPPAGE_PCT),
         ('pinned_params', set()),
     ]
     for key, default in defaults:
         if key not in st.session_state:
             st.session_state[key] = default
+
+    st.session_state.params = migrate_legacy_pamrp_params(st.session_state.params)
+    st.session_state.pinned_params = migrate_legacy_pamrp_pins(
+        st.session_state.get('pinned_params', set())
+    )
 
     # Forward-fill any new keys missing from an older session state
     for k, v in get_default_params().items():

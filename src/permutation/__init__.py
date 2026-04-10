@@ -20,8 +20,11 @@ If p < 0.05, we reject the null — the strategy's edge is unlikely due to chanc
 
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass, field
+
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
+
+from ..backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
 
 
 @dataclass
@@ -89,7 +92,8 @@ def run_permutation_test(
     n_trials: int = 50,
     min_trades: int = 5,
     initial_capital: float = 10000,
-    commission_pct: float = 0.1,
+    commission_pct: float = DEFAULT_COMMISSION_PCT,
+    slippage_pct: float = DEFAULT_SLIPPAGE_PCT,
     trade_direction: str = 'long_only',
     train_pct: float = 0.7,
     seed: int = 42,
@@ -108,6 +112,7 @@ def run_permutation_test(
         min_trades: minimum trades for valid optimization
         initial_capital: starting capital
         commission_pct: commission percentage
+        slippage_pct: slippage percentage applied per fill
         trade_direction: 'long_only', 'short_only', 'both'
         train_pct: train/test split fraction
         seed: random seed
@@ -134,6 +139,7 @@ def run_permutation_test(
         min_trades=min_trades,
         initial_capital=initial_capital,
         commission_pct=commission_pct,
+        slippage_pct=slippage_pct,
         trade_direction=trade_direction,
         train_pct=train_pct,
         use_walkforward=False,
@@ -171,6 +177,7 @@ def run_permutation_test(
                 min_trades=min_trades,
                 initial_capital=initial_capital,
                 commission_pct=commission_pct,
+                slippage_pct=slippage_pct,
                 trade_direction=trade_direction,
                 train_pct=train_pct,
                 use_walkforward=False,

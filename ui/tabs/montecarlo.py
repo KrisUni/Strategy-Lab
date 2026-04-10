@@ -14,6 +14,7 @@ from ui.charts import (
     create_mc_histogram,
     _chart_layout,PLOTLY_CONFIG
 )
+from ui.state_migration import migrate_legacy_pamrp_pins
 
 
 def render_montecarlo_tab() -> None:
@@ -115,21 +116,21 @@ def render_montecarlo_tab() -> None:
             st.warning("Load data first!")
         else:
             from src.permutation import run_permutation_test
-            from ui.helpers import get_active_filters_display
 
             p = st.session_state.params
             enabled_filters = {k: v for k, v in p.items() if k.endswith('_enabled') and isinstance(v, bool)}
 
             # Collect pinned params from session state
             pinned = {}
-            pinned_set = st.session_state.get('pinned_params', set())
+            pinned_set = migrate_legacy_pamrp_pins(st.session_state.get('pinned_params', set()))
+            if pinned_set != st.session_state.get('pinned_params', set()):
+                st.session_state.pinned_params = pinned_set
             if pinned_set:
                 for pk in pinned_set:
                     if pk in p:
                         pinned[pk] = p[pk]
 
             progress_bar = st.progress(0, text="Optimizing on real data...")
-            status_text = st.empty()
 
             def _progress(current, total):
                 pct = current / total
@@ -145,6 +146,7 @@ def render_montecarlo_tab() -> None:
                     min_trades=perm_min,
                     initial_capital=st.session_state.capital,
                     commission_pct=st.session_state.commission,
+                    slippage_pct=st.session_state.slippage,
                     trade_direction=perm_dir,
                     train_pct=0.7,
                     progress_callback=_progress,
@@ -152,7 +154,6 @@ def render_montecarlo_tab() -> None:
                 )
 
             progress_bar.empty()
-            status_text.empty()
 
             if perm_result:
                 st.session_state._perm_result = perm_result
