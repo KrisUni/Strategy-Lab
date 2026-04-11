@@ -123,354 +123,6 @@ _RANGE_BUTTONS_SHORT = [
     dict(count=1, label='1Y', step='year', stepmode='backward'),
     dict(step='all', label='All'),
 ]
-
-
-def _add_hpdr_overlay(fig: go.Figure, df: pd.DataFrame, bands, trace_ref: dict) -> None:
-    """Render the HPDR price overlay behind candles."""
-    idx = df.index
-
-    zones = [
-        ('2.0', '2.5', 'rgba(180,30,30,0.18)'),
-        ('1.5', '2.0', 'rgba(220,110,30,0.18)'),
-        ('1.0', '1.5', 'rgba(200,185,0,0.18)'),
-        ('0.5', '1.0', 'rgba(60,190,80,0.18)'),
-        ('0.0', '0.5', 'rgba(0,195,180,0.20)'),
-    ]
-
-    def _get(key):
-        series = bands.get(key)
-        return series.reindex(idx) if series is not None else None
-
-    center = _get('center')
-    upper = {z: _get(f'upper_{z}') for z in ['0.5', '1.0', '1.5', '2.0', '2.5']}
-    lower = {z: _get(f'lower_{z}') for z in ['0.5', '1.0', '1.5', '2.0', '2.5']}
-
-    for inner_z, outer_z, fill_rgba in zones:
-        u_inner = upper.get(inner_z) if inner_z != '0.0' else center
-        u_outer = upper.get(outer_z)
-        if u_inner is None or u_outer is None:
-            continue
-        fig.add_trace(go.Scatter(x=idx, y=u_outer, mode='lines',
-            line=dict(width=0.5, color=fill_rgba.replace('0.18', '0.4').replace('0.20', '0.4')),
-            showlegend=False, hoverinfo='skip'), **trace_ref)
-        fig.add_trace(go.Scatter(x=idx, y=u_inner, mode='lines',
-            line=dict(width=0), fill='tonexty', fillcolor=fill_rgba,
-            showlegend=False, hoverinfo='skip'), **trace_ref)
-
-    for inner_z, outer_z, fill_rgba in zones:
-        l_inner = lower.get(inner_z) if inner_z != '0.0' else center
-        l_outer = lower.get(outer_z)
-        if l_inner is None or l_outer is None:
-            continue
-        fig.add_trace(go.Scatter(x=idx, y=l_inner, mode='lines',
-            line=dict(width=0), showlegend=False, hoverinfo='skip'), **trace_ref)
-        fig.add_trace(go.Scatter(x=idx, y=l_outer, mode='lines',
-            line=dict(width=0.5, color=fill_rgba.replace('0.18', '0.4').replace('0.20', '0.4')),
-            fill='tonexty', fillcolor=fill_rgba, showlegend=False, hoverinfo='skip'), **trace_ref)
-
-    if center is not None:
-        fig.add_trace(go.Scatter(x=idx, y=center, mode='lines',
-            line=dict(color='rgba(255,255,255,0.35)', width=1, dash='dot'),
-            name='HPDR Center', showlegend=True, hoverinfo='skip'), **trace_ref)
-
-    for z, color in [('0.5', 'rgba(0,195,180,0.6)'), ('1.0', 'rgba(60,190,80,0.5)'),
-                      ('1.5', 'rgba(200,185,0,0.5)'), ('2.0', 'rgba(220,110,30,0.5)'),
-                      ('2.5', 'rgba(180,30,30,0.5)')]:
-        pct = {'0.5': '38%', '1.0': '68%', '1.5': '87%', '2.0': '95%', '2.5': '99%'}[z]
-        for side, arr in [('upper', upper), ('lower', lower)]:
-            series = arr.get(z)
-            if series is not None:
-                fig.add_trace(go.Scatter(x=idx, y=series, mode='lines',
-                    line=dict(color=color, width=0.8),
-                    name=f'HPDR ±{z}σ ({pct})' if side == 'upper' else None,
-                    showlegend=(side == 'upper'),
-                    hovertemplate=f'±{z}σ: %{{y:.2f}}<extra></extra>'), **trace_ref)
-
-
-def _add_trade_overlays(fig: go.Figure, df: pd.DataFrame, trades, trace_ref: dict) -> None:
-    """Render full-height entry and exit bars on the price panel."""
-    price_min = float(df['low'].min())
-    price_max = float(df['high'].max())
-    pad = (price_max - price_min) * 0.05
-    y_lo, y_hi = price_min - pad, price_max + pad
-
-    long_x, long_y, long_h = [], [], []
-    short_x, short_y, short_h = [], [], []
-    long_exit_x, long_exit_y, long_exit_h = [], [], []
-    short_exit_x, short_exit_y, short_exit_h = [], [], []
-
-    for trade in trades:
-        same_bar = (
-            trade.exit_idx is not None and trade.entry_idx == trade.exit_idx
-        ) or (
-            trade.exit_date is not None and trade.entry_date == trade.exit_date
-        )
-        entry_x = long_x if trade.direction == 'long' else short_x
-        entry_y = long_y if trade.direction == 'long' else short_y
-        entry_h = long_h if trade.direction == 'long' else short_h
-        entry_x.extend([trade.entry_date, trade.entry_date, None])
-        entry_y.extend([y_lo, y_hi, None])
-        entry_label = (
-            f"{'Long' if trade.direction == 'long' else 'Short'} Entry @ ${trade.entry_price:.2f}"
-            + (" | same-bar trade" if same_bar else "")
-        )
-        entry_h.extend([entry_label, entry_label, None])
-
-        if trade.exit_date:
-            exit_x = long_exit_x if trade.direction == 'long' else short_exit_x
-            exit_y = long_exit_y if trade.direction == 'long' else short_exit_y
-            exit_h = long_exit_h if trade.direction == 'long' else short_exit_h
-            exit_x.extend([trade.exit_date, trade.exit_date, None])
-            exit_y.extend([y_lo, y_hi, None])
-            exit_label = (
-                f"{'Long' if trade.direction == 'long' else 'Short'} Exit @ ${trade.exit_price:.2f}"
-                f" | PnL ${trade.pnl:+.2f} | {trade.exit_reason}"
-                + (" | same-bar" if same_bar else "")
-            )
-            exit_h.extend([exit_label, exit_label, None])
-
-    if long_x:
-        fig.add_trace(go.Scatter(x=long_x, y=long_y, mode='lines',
-            line=dict(color='rgba(16,185,129,0.8)', width=1.5),
-            text=long_h, hoverinfo='text',
-            name='Long Entries', showlegend=True), **trace_ref)
-    if short_x:
-        fig.add_trace(go.Scatter(x=short_x, y=short_y, mode='lines',
-            line=dict(color='rgba(239,68,68,0.8)', width=1.5),
-            text=short_h, hoverinfo='text',
-            name='Short Entries', showlegend=True), **trace_ref)
-    if long_exit_x:
-        fig.add_trace(go.Scatter(x=long_exit_x, y=long_exit_y, mode='lines',
-            line=dict(color='rgba(56,189,248,0.95)', width=1.8, dash='dot'),
-            text=long_exit_h, hoverinfo='text',
-            name='Long Exits', showlegend=True), **trace_ref)
-    if short_exit_x:
-        fig.add_trace(go.Scatter(x=short_exit_x, y=short_exit_y, mode='lines',
-            line=dict(color='rgba(245,158,11,0.95)', width=1.8, dash='dot'),
-            text=short_exit_h, hoverinfo='text',
-            name='Short Exits', showlegend=True), **trace_ref)
-
-
-def _add_price_indicator_overlays(
-    fig: go.Figure,
-    indicator_df: pd.DataFrame,
-    overlay_inds: List[str],
-    params: dict,
-    trace_ref: dict,
-) -> None:
-    """Render strategy overlays that sit on the main price panel."""
-    if 'ma' in overlay_inds:
-        ma_type = params.get('ma_type', 'sma').upper()
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['ma_fast'], mode='lines',
-            line=dict(color='#3b82f6', width=1.2),
-            name=f"{ma_type}({params.get('ma_fast_length', 50)})", showlegend=True), **trace_ref)
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['ma_slow'], mode='lines',
-            line=dict(color='#f59e0b', width=1.2),
-            name=f"{ma_type}({params.get('ma_slow_length', 200)})", showlegend=True), **trace_ref)
-
-    if 'supertrend' in overlay_inds:
-        bull_st = indicator_df['supertrend'].where(indicator_df['st_direction'] > 0)
-        bear_st = indicator_df['supertrend'].where(indicator_df['st_direction'] < 0)
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=bull_st, mode='lines',
-            line=dict(color='#10b981', width=1.5),
-            name='Supertrend ▲', showlegend=True), **trace_ref)
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=bear_st, mode='lines',
-            line=dict(color='#ef4444', width=1.5),
-            name='Supertrend ▼', showlegend=True), **trace_ref)
-
-    if 'vwap' in overlay_inds:
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['vwap'], mode='lines',
-            line=dict(color='#a855f7', width=1.2, dash='dash'),
-            name='VWAP', showlegend=True), **trace_ref)
-
-
-def _add_pamrp_panel(fig: go.Figure, indicator_df: pd.DataFrame, params: dict, row: int, trace_ref: dict) -> None:
-    """Render the PAMRP subplot."""
-    entry_length = params.get('pamrp_entry_length', 21)
-    exit_length = params.get('pamrp_exit_length', 21)
-    show_entry = params.get('pamrp_enabled') and 'pamrp_entry' in indicator_df.columns
-    show_exit = params.get('pamrp_exit_enabled') and 'pamrp_exit' in indicator_df.columns
-    same_length = entry_length == exit_length
-
-    if show_entry:
-        fig.add_trace(go.Scatter(
-            x=indicator_df.index, y=indicator_df['pamrp_entry'], mode='lines',
-            line=dict(color='#60a5fa', width=1.2),
-            name='PAMRP Entry' if show_exit and not same_length else 'PAMRP',
-            showlegend=True,
-        ), **trace_ref)
-    elif 'pamrp' in indicator_df.columns:
-        fig.add_trace(go.Scatter(
-            x=indicator_df.index, y=indicator_df['pamrp'], mode='lines',
-            line=dict(color='#60a5fa', width=1.2),
-            name='PAMRP', showlegend=True,
-        ), **trace_ref)
-
-    if show_exit and (not show_entry or not same_length):
-        fig.add_trace(go.Scatter(
-            x=indicator_df.index, y=indicator_df['pamrp_exit'], mode='lines',
-            line=dict(color='#f59e0b', width=1.2, dash='dot'),
-            name='PAMRP Exit', showlegend=True,
-        ), **trace_ref)
-
-    if params.get('pamrp_enabled'):
-        fig.add_hline(y=params.get('pamrp_entry_long', 20), line_dash='dash',
-            line_color='rgba(16,185,129,0.6)', row=row, col=1)
-        fig.add_hline(y=params.get('pamrp_entry_short', 80), line_dash='dash',
-            line_color='rgba(239,68,68,0.6)', row=row, col=1)
-    if params.get('pamrp_exit_enabled'):
-        fig.add_hline(y=params.get('pamrp_exit_long', 70), line_dash='dot',
-            line_color='rgba(245,158,11,0.7)', row=row, col=1)
-        fig.add_hline(y=params.get('pamrp_exit_short', 30), line_dash='dot',
-            line_color='rgba(249,115,22,0.7)', row=row, col=1)
-    fig.update_yaxes(title_text='PAMRP', range=[0, 100],
-        title_font=dict(size=8), row=row, col=1)
-
-
-def _add_bbwp_panel(fig: go.Figure, indicator_df: pd.DataFrame, params: dict, row: int, trace_ref: dict) -> None:
-    """Render the BBWP subplot."""
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['bbwp'], mode='lines',
-        line=dict(color='#60a5fa', width=1.2),
-        name='BBWP', showlegend=True), **trace_ref)
-    if 'bbwp_sma' in indicator_df.columns:
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['bbwp_sma'], mode='lines',
-            line=dict(color='#f59e0b', width=1),
-            name='BBWP SMA', showlegend=True), **trace_ref)
-    fig.add_hline(y=params.get('bbwp_threshold_long', 50), line_dash='dash',
-        line_color='rgba(16,185,129,0.6)', row=row, col=1)
-    fig.add_hline(y=params.get('bbwp_threshold_short', 50), line_dash='dash',
-        line_color='rgba(239,68,68,0.6)', row=row, col=1)
-    fig.update_yaxes(title_text='BBWP', range=[0, 100],
-        title_font=dict(size=8), row=row, col=1)
-
-
-def _add_rsi_panel(fig: go.Figure, indicator_df: pd.DataFrame, params: dict, row: int, trace_ref: dict) -> None:
-    """Render the RSI subplot."""
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['rsi'], mode='lines',
-        line=dict(color='#a855f7', width=1.2),
-        name=f"RSI({params.get('rsi_length', 14)})", showlegend=True), **trace_ref)
-    fig.add_hline(y=params.get('rsi_oversold', 30), line_dash='dash',
-        line_color='rgba(16,185,129,0.6)', row=row, col=1)
-    fig.add_hline(y=params.get('rsi_overbought', 70), line_dash='dash',
-        line_color='rgba(239,68,68,0.6)', row=row, col=1)
-    fig.add_hline(y=50, line_color='rgba(255,255,255,0.15)', row=row, col=1)
-    fig.update_yaxes(title_text='RSI', range=[0, 100],
-        title_font=dict(size=8), row=row, col=1)
-
-
-def _add_adx_panel(fig: go.Figure, indicator_df: pd.DataFrame, params: dict, row: int, trace_ref: dict) -> None:
-    """Render the ADX subplot."""
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['adx'], mode='lines',
-        line=dict(color='#f59e0b', width=1.2),
-        name='ADX', showlegend=True), **trace_ref)
-    if 'di_plus' in indicator_df.columns:
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['di_plus'], mode='lines',
-            line=dict(color='#10b981', width=0.8),
-            name='+DI', showlegend=True), **trace_ref)
-    if 'di_minus' in indicator_df.columns:
-        fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['di_minus'], mode='lines',
-            line=dict(color='#ef4444', width=0.8),
-            name='-DI', showlegend=True), **trace_ref)
-    fig.add_hline(y=params.get('adx_threshold', 20), line_dash='dash',
-        line_color='rgba(255,255,255,0.3)', row=row, col=1)
-    fig.update_yaxes(title_text='ADX', title_font=dict(size=8), row=row, col=1)
-
-
-def _add_macd_panel(fig: go.Figure, indicator_df: pd.DataFrame, row: int, trace_ref: dict) -> None:
-    """Render the MACD subplot."""
-    hist = indicator_df['macd_hist'].fillna(0)
-    bar_colors = [
-        'rgba(16,185,129,0.7)' if value >= 0 else 'rgba(239,68,68,0.7)'
-        for value in hist
-    ]
-    fig.add_trace(go.Bar(x=indicator_df.index, y=hist,
-        marker_color=bar_colors,
-        name='MACD Hist', showlegend=True), **trace_ref)
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['macd'], mode='lines',
-        line=dict(color='#60a5fa', width=1.2),
-        name='MACD', showlegend=True), **trace_ref)
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['macd_signal'], mode='lines',
-        line=dict(color='#f59e0b', width=1),
-        name='Signal', showlegend=True), **trace_ref)
-    fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', row=row, col=1)
-    fig.update_yaxes(title_text='MACD', title_font=dict(size=8), row=row, col=1)
-
-
-def _add_stoch_panel(fig: go.Figure, indicator_df: pd.DataFrame, params: dict, row: int, trace_ref: dict) -> None:
-    """Render the Stoch RSI subplot."""
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['stoch_k'], mode='lines',
-        line=dict(color='#60a5fa', width=1.2),
-        name='Stoch %K', showlegend=True), **trace_ref)
-    fig.add_trace(go.Scatter(x=indicator_df.index, y=indicator_df['stoch_d'], mode='lines',
-        line=dict(color='#f59e0b', width=1),
-        name='Stoch %D', showlegend=True), **trace_ref)
-    fig.add_hline(y=params.get('stoch_rsi_overbought', 80), line_dash='dash',
-        line_color='rgba(239,68,68,0.6)', row=row, col=1)
-    fig.add_hline(y=params.get('stoch_rsi_oversold', 20), line_dash='dash',
-        line_color='rgba(16,185,129,0.6)', row=row, col=1)
-    fig.update_yaxes(title_text='Stoch RSI', range=[0, 100],
-        title_font=dict(size=8), row=row, col=1)
-
-
-def _add_indicator_sub_panel(
-    fig: go.Figure,
-    indicator_df: pd.DataFrame,
-    params: dict,
-    panel_name: str,
-    row: int,
-) -> None:
-    """Dispatch subplot rendering for oscillator-style indicators."""
-    trace_ref = dict(row=row, col=1)
-
-    if panel_name == 'pamrp':
-        _add_pamrp_panel(fig, indicator_df, params, row, trace_ref)
-    elif panel_name == 'bbwp':
-        _add_bbwp_panel(fig, indicator_df, params, row, trace_ref)
-    elif panel_name == 'rsi':
-        _add_rsi_panel(fig, indicator_df, params, row, trace_ref)
-    elif panel_name == 'adx':
-        _add_adx_panel(fig, indicator_df, params, row, trace_ref)
-    elif panel_name == 'macd':
-        _add_macd_panel(fig, indicator_df, row, trace_ref)
-    elif panel_name == 'stoch':
-        _add_stoch_panel(fig, indicator_df, params, row, trace_ref)
-
-
-def _get_price_y_range(df: pd.DataFrame) -> list[float]:
-    """Return the padded price y-range used by the main price panel."""
-    price_min = float(df['low'].min())
-    price_max = float(df['high'].max())
-    pad = (price_max - price_min) * 0.05
-    return [price_min - pad, price_max + pad]
-
-
-def _apply_price_chart_layout(
-    fig: go.Figure,
-    df: pd.DataFrame,
-    n_sub_panels: int,
-    use_subplots: bool,
-    show_legend: bool,
-) -> None:
-    """Apply the shared layout and axis rules for the main price chart."""
-    total_height = 400 + n_sub_panels * 120
-    fig.update_layout(
-        **_chart_layout(total_height, showlegend=show_legend,
-                        legend=dict(orientation='h', y=1.06, font=dict(size=8), traceorder='normal')),
-        xaxis_rangeslider_visible=False,
-        xaxis_rangeselector=dict(
-            buttons=_RANGE_BUTTONS_FULL,
-            x=0, y=1.06,
-            **_RANGE_SELECTOR_STYLE,
-        ),
-    )
-    fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
-    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
-
-    y_range = _get_price_y_range(df)
-    if use_subplots:
-        fig.update_yaxes(range=y_range, row=1, col=1)
-    else:
-        fig.update_yaxes(range=y_range)
 # ─────────────────────────────────────────────────────────────────────────────
 # Price chart
 # ─────────────────────────────────────────────────────────────────────────────
@@ -542,7 +194,64 @@ def create_price_chart_with_trades(
 
     # ── HPDR rainbow cone — drawn BEFORE candles so it sits behind ───────────
     if bands is not None:
-        _add_hpdr_overlay(fig, df, bands, r1)
+        idx = df.index
+
+        ZONES = [
+            ('2.0', '2.5', 'rgba(180,30,30,0.18)'),
+            ('1.5', '2.0', 'rgba(220,110,30,0.18)'),
+            ('1.0', '1.5', 'rgba(200,185,0,0.18)'),
+            ('0.5', '1.0', 'rgba(60,190,80,0.18)'),
+            ('0.0', '0.5', 'rgba(0,195,180,0.20)'),
+        ]
+
+        def _get(key):
+            s = bands.get(key)
+            return s.reindex(idx) if s is not None else None
+
+        center = _get('center')
+        upper = {z: _get(f'upper_{z}') for z in ['0.5', '1.0', '1.5', '2.0', '2.5']}
+        lower = {z: _get(f'lower_{z}') for z in ['0.5', '1.0', '1.5', '2.0', '2.5']}
+
+        for inner_z, outer_z, fill_rgba in ZONES:
+            u_inner = upper.get(inner_z) if inner_z != '0.0' else center
+            u_outer = upper.get(outer_z)
+            if u_inner is None or u_outer is None:
+                continue
+            fig.add_trace(go.Scatter(x=idx, y=u_outer, mode='lines',
+                line=dict(width=0.5, color=fill_rgba.replace('0.18', '0.4').replace('0.20', '0.4')),
+                showlegend=False, hoverinfo='skip'), **r1)
+            fig.add_trace(go.Scatter(x=idx, y=u_inner, mode='lines',
+                line=dict(width=0), fill='tonexty', fillcolor=fill_rgba,
+                showlegend=False, hoverinfo='skip'), **r1)
+
+        for inner_z, outer_z, fill_rgba in ZONES:
+            l_inner = lower.get(inner_z) if inner_z != '0.0' else center
+            l_outer = lower.get(outer_z)
+            if l_inner is None or l_outer is None:
+                continue
+            fig.add_trace(go.Scatter(x=idx, y=l_inner, mode='lines',
+                line=dict(width=0), showlegend=False, hoverinfo='skip'), **r1)
+            fig.add_trace(go.Scatter(x=idx, y=l_outer, mode='lines',
+                line=dict(width=0.5, color=fill_rgba.replace('0.18', '0.4').replace('0.20', '0.4')),
+                fill='tonexty', fillcolor=fill_rgba, showlegend=False, hoverinfo='skip'), **r1)
+
+        if center is not None:
+            fig.add_trace(go.Scatter(x=idx, y=center, mode='lines',
+                line=dict(color='rgba(255,255,255,0.35)', width=1, dash='dot'),
+                name='HPDR Center', showlegend=True, hoverinfo='skip'), **r1)
+
+        for z, color in [('0.5', 'rgba(0,195,180,0.6)'), ('1.0', 'rgba(60,190,80,0.5)'),
+                          ('1.5', 'rgba(200,185,0,0.5)'), ('2.0', 'rgba(220,110,30,0.5)'),
+                          ('2.5', 'rgba(180,30,30,0.5)')]:
+            pct = {'0.5': '38%', '1.0': '68%', '1.5': '87%', '2.0': '95%', '2.5': '99%'}[z]
+            for side, arr in [('upper', upper), ('lower', lower)]:
+                s = arr.get(z)
+                if s is not None:
+                    fig.add_trace(go.Scatter(x=idx, y=s, mode='lines',
+                        line=dict(color=color, width=0.8),
+                        name=f'HPDR ±{z}σ ({pct})' if side == 'upper' else None,
+                        showlegend=(side == 'upper'),
+                        hovertemplate=f'±{z}σ: %{{y:.2f}}<extra></extra>'), **r1)
 
     # ── Candlesticks ──────────────────────────────────────────────────────────
     fig.add_trace(go.Candlestick(
@@ -553,21 +262,248 @@ def create_price_chart_with_trades(
 
     # ── Trade vertical lines (O(1) traces via None-gap segments) ─────────────
     if trades:
-        _add_trade_overlays(fig, df, trades, r1)
+        price_min = float(df['low'].min())
+        price_max = float(df['high'].max())
+        pad = (price_max - price_min) * 0.05
+        y_lo, y_hi = price_min - pad, price_max + pad
+
+        long_x, long_y, long_h = [], [], []
+        short_x, short_y, short_h = [], [], []
+        long_exit_x, long_exit_y, long_exit_h = [], [], []
+        short_exit_x, short_exit_y, short_exit_h = [], [], []
+
+        for t in trades:
+            same_bar = (
+                t.exit_idx is not None and t.entry_idx == t.exit_idx
+            ) or (
+                t.exit_date is not None and t.entry_date == t.exit_date
+            )
+            dst_x = long_x if t.direction == 'long' else short_x
+            dst_y = long_y if t.direction == 'long' else short_y
+            dst_h = long_h if t.direction == 'long' else short_h
+            dst_x.extend([t.entry_date, t.entry_date, None])
+            dst_y.extend([y_lo, y_hi, None])
+            label = (
+                f"{'Long' if t.direction == 'long' else 'Short'} Entry @ ${t.entry_price:.2f}"
+                + (" | same-bar trade" if same_bar else "")
+            )
+            dst_h.extend([label, label, None])
+
+            if t.exit_date:
+                exit_x = long_exit_x if t.direction == 'long' else short_exit_x
+                exit_y = long_exit_y if t.direction == 'long' else short_exit_y
+                exit_h = long_exit_h if t.direction == 'long' else short_exit_h
+                exit_x.extend([t.exit_date, t.exit_date, None])
+                exit_y.extend([y_lo, y_hi, None])
+                label = (
+                    f"{'Long' if t.direction == 'long' else 'Short'} Exit @ ${t.exit_price:.2f}"
+                    f" | PnL ${t.pnl:+.2f} | {t.exit_reason}"
+                    + (" | same-bar" if same_bar else "")
+                )
+                exit_h.extend([label, label, None])
+
+        if long_x:
+            # Keep the price chart on Plotly's SVG renderer. Mixing Scattergl
+            # with candlesticks causes visibly clipy redraws while zooming.
+            fig.add_trace(go.Scatter(x=long_x, y=long_y, mode='lines',
+                line=dict(color='rgba(16,185,129,0.8)', width=1.5),
+                text=long_h, hoverinfo='text',
+                name='Long Entries', showlegend=True), **r1)
+        if short_x:
+            fig.add_trace(go.Scatter(x=short_x, y=short_y, mode='lines',
+                line=dict(color='rgba(239,68,68,0.8)', width=1.5),
+                text=short_h, hoverinfo='text',
+                name='Short Entries', showlegend=True), **r1)
+        if long_exit_x:
+            fig.add_trace(go.Scatter(x=long_exit_x, y=long_exit_y, mode='lines',
+                line=dict(color='rgba(56,189,248,0.95)', width=1.8, dash='dot'),
+                text=long_exit_h, hoverinfo='text',
+                name='Long Exits', showlegend=True), **r1)
+        if short_exit_x:
+            fig.add_trace(go.Scatter(x=short_exit_x, y=short_exit_y, mode='lines',
+                line=dict(color='rgba(245,158,11,0.95)', width=1.8, dash='dot'),
+                text=short_exit_h, hoverinfo='text',
+                name='Short Exits', showlegend=True), **r1)
 
     # ── Overlay indicators on price panel ─────────────────────────────────────
     if idf is not None:
-        _add_price_indicator_overlays(fig, idf, overlay_inds, p, r1)
+        if 'ma' in overlay_inds:
+            ma_type = p.get('ma_type', 'sma').upper()
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['ma_fast'], mode='lines',
+                line=dict(color='#3b82f6', width=1.2),
+                name=f"{ma_type}({p.get('ma_fast_length', 50)})", showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['ma_slow'], mode='lines',
+                line=dict(color='#f59e0b', width=1.2),
+                name=f"{ma_type}({p.get('ma_slow_length', 200)})", showlegend=True), **r1)
+
+        if 'supertrend' in overlay_inds:
+            bull_st = idf['supertrend'].where(idf['st_direction'] > 0)
+            bear_st = idf['supertrend'].where(idf['st_direction'] < 0)
+            fig.add_trace(go.Scatter(x=idf.index, y=bull_st, mode='lines',
+                line=dict(color='#10b981', width=1.5),
+                name='Supertrend ▲', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=bear_st, mode='lines',
+                line=dict(color='#ef4444', width=1.5),
+                name='Supertrend ▼', showlegend=True), **r1)
+
+        if 'vwap' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['vwap'], mode='lines',
+                line=dict(color='#a855f7', width=1.2, dash='dash'),
+                name='VWAP', showlegend=True), **r1)
 
     # ── Oscillator sub-panels ─────────────────────────────────────────────────
     if idf is not None:
         for i, panel_name in enumerate(sub_panel_inds):
             row = i + 2
-            _add_indicator_sub_panel(fig, idf, p, panel_name, row)
+            rn = dict(row=row, col=1)
+
+            if panel_name == 'pamrp':
+                entry_length = p.get('pamrp_entry_length', 21)
+                exit_length = p.get('pamrp_exit_length', 21)
+                show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
+                show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
+                same_length = entry_length == exit_length
+
+                if show_entry:
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp_entry'], mode='lines',
+                        line=dict(color='#60a5fa', width=1.2),
+                        name='PAMRP Entry' if show_exit and not same_length else 'PAMRP',
+                        showlegend=True,
+                    ), **rn)
+                elif 'pamrp' in idf.columns:
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp'], mode='lines',
+                        line=dict(color='#60a5fa', width=1.2),
+                        name='PAMRP', showlegend=True,
+                    ), **rn)
+
+                if show_exit and (not show_entry or not same_length):
+                    fig.add_trace(go.Scatter(
+                        x=idf.index, y=idf['pamrp_exit'], mode='lines',
+                        line=dict(color='#f59e0b', width=1.2, dash='dot'),
+                        name='PAMRP Exit', showlegend=True,
+                    ), **rn)
+
+                if p.get('pamrp_enabled'):
+                    fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
+                        line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                    fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
+                        line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                if p.get('pamrp_exit_enabled'):
+                    fig.add_hline(y=p.get('pamrp_exit_long', 70), line_dash='dot',
+                        line_color='rgba(245,158,11,0.7)', row=row, col=1)
+                    fig.add_hline(y=p.get('pamrp_exit_short', 30), line_dash='dot',
+                        line_color='rgba(249,115,22,0.7)', row=row, col=1)
+                fig.update_yaxes(title_text='PAMRP', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'bbwp':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='BBWP', showlegend=True), **rn)
+                if 'bbwp_sma' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp_sma'], mode='lines',
+                        line=dict(color='#f59e0b', width=1),
+                        name='BBWP SMA', showlegend=True), **rn)
+                fig.add_hline(y=p.get('bbwp_threshold_long', 50), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('bbwp_threshold_short', 50), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='BBWP', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'rsi':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['rsi'], mode='lines',
+                    line=dict(color='#a855f7', width=1.2),
+                    name=f"RSI({p.get('rsi_length', 14)})", showlegend=True), **rn)
+                fig.add_hline(y=p.get('rsi_oversold', 30), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('rsi_overbought', 70), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=50, line_color='rgba(255,255,255,0.15)', row=row, col=1)
+                fig.update_yaxes(title_text='RSI', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'adx':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['adx'], mode='lines',
+                    line=dict(color='#f59e0b', width=1.2),
+                    name='ADX', showlegend=True), **rn)
+                if 'di_plus' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['di_plus'], mode='lines',
+                        line=dict(color='#10b981', width=0.8),
+                        name='+DI', showlegend=True), **rn)
+                if 'di_minus' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['di_minus'], mode='lines',
+                        line=dict(color='#ef4444', width=0.8),
+                        name='-DI', showlegend=True), **rn)
+                fig.add_hline(y=p.get('adx_threshold', 20), line_dash='dash',
+                    line_color='rgba(255,255,255,0.3)', row=row, col=1)
+                fig.update_yaxes(title_text='ADX',
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'macd':
+                hist = idf['macd_hist'].fillna(0)
+                bar_colors = [
+                    'rgba(16,185,129,0.7)' if v >= 0 else 'rgba(239,68,68,0.7)'
+                    for v in hist
+                ]
+                fig.add_trace(go.Bar(x=idf.index, y=hist,
+                    marker_color=bar_colors,
+                    name='MACD Hist', showlegend=True), **rn)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['macd'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='MACD', showlegend=True), **rn)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['macd_signal'], mode='lines',
+                    line=dict(color='#f59e0b', width=1),
+                    name='Signal', showlegend=True), **rn)
+                fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', row=row, col=1)
+                fig.update_yaxes(title_text='MACD',
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'stoch':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_k'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='Stoch %K', showlegend=True), **rn)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_d'], mode='lines',
+                    line=dict(color='#f59e0b', width=1),
+                    name='Stoch %D', showlegend=True), **rn)
+                fig.add_hline(y=p.get('stoch_rsi_overbought', 80), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('stoch_rsi_oversold', 20), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='Stoch RSI', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
 
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
+    price_min = float(df['low'].min())
+    price_max = float(df['high'].max())
+    pad = (price_max - price_min) * 0.05
+    y_range = [price_min - pad, price_max + pad]
+
     show_legend = bands is not None or bool(overlay_inds) or bool(sub_panel_inds) or bool(trades)
-    _apply_price_chart_layout(fig, df, n_sub, use_subplots, show_legend)
+    total_height = 400 + n_sub * 120
+
+    fig.update_layout(
+        **_chart_layout(total_height, showlegend=show_legend,
+                        legend=dict(orientation='h', y=1.06, font=dict(size=8), traceorder='normal')),
+        xaxis_rangeslider_visible=False,
+        xaxis_rangeselector=dict(
+            buttons=_RANGE_BUTTONS_FULL,
+            x=0, y=1.06,
+            **_RANGE_SELECTOR_STYLE,
+        ),
+    )
+    fig.update_xaxes(gridcolor='rgba(45,53,72,0.3)')
+    # Keep zoom interaction on the time axis only. Letting Plotly zoom/pan the
+    # y-axes during wheel zoom is what makes the chart feel like it is snapping
+    # between rescaled frames.
+    fig.update_yaxes(gridcolor='rgba(45,53,72,0.3)', fixedrange=True)
+
+    if use_subplots:
+        fig.update_yaxes(range=y_range, row=1, col=1)
+    else:
+        fig.update_yaxes(range=y_range)
 
     return fig
 

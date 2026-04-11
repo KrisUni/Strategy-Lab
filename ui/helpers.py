@@ -14,16 +14,8 @@ import pandas as pd
 import streamlit as st
 from typing import Dict, Any
 
-from src.strategy import (
-    StrategyParams,
-    ConditionOperator,
-    TradeDirection,
-    coerce_bool,
-    coerce_condition_operator,
-    coerce_entry_conflict_mode,
-)
+from src.strategy import StrategyParams, TradeDirection, ConditionOperator, EntryConflictMode
 from ui.state_migration import migrate_legacy_pamrp_params
-from ui.trade_direction import opt_direction_to_sidebar, sidebar_direction_to_trade_direction
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,14 +58,39 @@ PARAM_TO_WIDGET_KEY: Dict[str, str] = {
 def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
     """Convert the flat session-state params dict into a typed StrategyParams object."""
     p = migrate_legacy_pamrp_params(p)
+    direction_map = {
+        'Long Only': TradeDirection.LONG_ONLY,
+        'Short Only': TradeDirection.SHORT_ONLY,
+        'Both': TradeDirection.BOTH,
+    }
+
+    def parse_operator(value: Any, default: ConditionOperator) -> ConditionOperator:
+        if isinstance(value, ConditionOperator):
+            return value
+        if isinstance(value, str):
+            try:
+                return ConditionOperator(value.lower())
+            except ValueError:
+                return default
+        return default
+
+    def parse_entry_conflict_mode(value: Any, default: EntryConflictMode) -> EntryConflictMode:
+        if isinstance(value, EntryConflictMode):
+            return value
+        if isinstance(value, str):
+            try:
+                return EntryConflictMode(value.lower())
+            except ValueError:
+                return default
+        return default
 
     return StrategyParams(
-        trade_direction=sidebar_direction_to_trade_direction(p.get('trade_direction', 'Long Only')),
-        entry_operator=coerce_condition_operator(p.get('entry_operator', 'and')),
-        exit_operator=coerce_condition_operator(p.get('exit_operator', 'or'), default=ConditionOperator.OR),
-        allow_same_bar_exit=coerce_bool(p.get('allow_same_bar_exit', True), True),
-        allow_same_bar_reversal=coerce_bool(p.get('allow_same_bar_reversal', False), False),
-        entry_conflict_mode=coerce_entry_conflict_mode(p.get('entry_conflict_mode', 'skip')),
+        trade_direction=direction_map.get(p.get('trade_direction', 'Long Only'), TradeDirection.LONG_ONLY),
+        entry_operator=parse_operator(p.get('entry_operator', 'and'), ConditionOperator.AND),
+        exit_operator=parse_operator(p.get('exit_operator', 'or'), ConditionOperator.OR),
+        allow_same_bar_exit=p.get('allow_same_bar_exit', True),
+        allow_same_bar_reversal=p.get('allow_same_bar_reversal', False),
+        entry_conflict_mode=parse_entry_conflict_mode(p.get('entry_conflict_mode', 'skip'), EntryConflictMode.SKIP),
         position_size_pct=p.get('position_size_pct', 100.0),
         use_kelly=p.get('use_kelly', False), kelly_fraction=p.get('kelly_fraction', 0.5),
         pamrp_enabled=p.get('pamrp_enabled', True),
@@ -178,7 +195,8 @@ def apply_best_params_callback() -> None:
         if wk:
             st.session_state[wk] = v
     if 'trade_direction_str' in bp:
-        trade_direction = opt_direction_to_sidebar(bp['trade_direction_str'])
+        dm = {'long_only': 'Long Only', 'short_only': 'Short Only', 'both': 'Both'}
+        trade_direction = dm.get(bp['trade_direction_str'], 'Long Only')
         st.session_state.params['trade_direction'] = trade_direction
         st.session_state.tdir = trade_direction
     st.session_state.capital = res.initial_capital

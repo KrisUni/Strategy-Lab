@@ -15,8 +15,6 @@ from ui.charts import (
     _chart_layout,PLOTLY_CONFIG
 )
 from ui.state_migration import migrate_legacy_pamrp_pins
-from ui.state_sync import sync_following_session_value
-from ui.trade_direction import OPT_DIRECTION_OPTIONS, OPT_DIRECTION_LABELS, format_opt_direction, sidebar_direction_to_opt
 
 
 def render_montecarlo_tab() -> None:
@@ -98,12 +96,11 @@ def render_montecarlo_tab() -> None:
         "We try to **disprove** this by showing the real-data metric sits above the permutation cloud."
     )
 
-    _sync_permutation_inputs()
-
     c1, c2, c3 = st.columns(3)
     perm_metric = c1.selectbox(
         "Test Metric",
         ["profit_factor", "sharpe_ratio", "total_return_pct", "sortino_ratio"],
+        index=0,
         key="perm_metric",
     )
     n_perms = c2.slider("Permutations", 20, 500, 100, key="perm_n")
@@ -111,13 +108,7 @@ def render_montecarlo_tab() -> None:
         help="Optuna trials per optimization run. Lower = faster but noisier.")
 
     c1, c2 = st.columns(2)
-    perm_dir = c1.selectbox(
-        "Direction",
-        OPT_DIRECTION_OPTIONS,
-        key="perm_dir",
-        format_func=format_opt_direction,
-        help="Defaults to the current Optimize direction, or the active strategy direction if Optimize has not been set.",
-    )
+    perm_dir = c1.selectbox("Direction", ["long_only", "short_only", "both"], key="perm_dir")
     perm_min = c2.slider("Min Trades", 3, 20, 5, key="perm_min_trades")
 
     if st.button("🧪 Run Permutation Test", use_container_width=True):
@@ -171,43 +162,6 @@ def render_montecarlo_tab() -> None:
     perm = st.session_state.get('_perm_result')
     if perm:
         _render_permutation_results(perm)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Sync helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _sync_permutation_inputs() -> None:
-    current_opt_metric = _get_current_opt_metric()
-    sync_following_session_value('perm_metric', current_opt_metric, '_last_perm_source_metric')
-
-    current_opt_direction = _get_current_opt_direction()
-    sync_following_session_value('perm_dir', current_opt_direction, '_last_perm_source_direction')
-
-
-def _get_current_opt_metric() -> str:
-    if 'opt_metric' in st.session_state:
-        return st.session_state.opt_metric
-
-    optimization_results = st.session_state.get('optimization_results')
-    if optimization_results is not None and getattr(optimization_results, 'metric', None):
-        return optimization_results.metric
-
-    return 'profit_factor'
-
-
-def _get_current_opt_direction() -> str:
-    if 'opt_dir' in st.session_state:
-        return st.session_state.opt_dir
-
-    optimization_results = st.session_state.get('optimization_results')
-    if optimization_results is not None:
-        best_params = getattr(optimization_results, 'best_params', {}) or {}
-        trade_direction = best_params.get('trade_direction_str')
-        if trade_direction in OPT_DIRECTION_LABELS:
-            return trade_direction
-
-    return sidebar_direction_to_opt(st.session_state.params.get('trade_direction', 'Long Only'))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

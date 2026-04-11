@@ -71,58 +71,6 @@ class BacktestResults:
     bars_per_year: int = 252
 
 
-@dataclass
-class _RecentTradeStats:
-    """Rolling realized stats used by the Kelly sizing path."""
-    recent_wins: int = 0
-    recent_total: int = 0
-    sum_win_pct: float = 0.0
-    count_wins: int = 0
-    sum_loss_pct: float = 0.0
-    count_losses: int = 0
-
-    @property
-    def win_rate(self) -> float:
-        return self.recent_wins / self.recent_total if self.recent_total > 0 else 0.5
-
-    @property
-    def realized_avg_win(self) -> float:
-        return (self.sum_win_pct / self.count_wins) if self.count_wins > 0 else 0.0
-
-    @property
-    def realized_avg_loss(self) -> float:
-        return (self.sum_loss_pct / self.count_losses) if self.count_losses > 0 else 0.0
-
-    def record_trade(self, trade: Trade) -> None:
-        self.recent_total += 1
-        if trade.pnl > 0:
-            self.recent_wins += 1
-            self.sum_win_pct += abs(trade.pnl_pct)
-            self.count_wins += 1
-        else:
-            self.sum_loss_pct += abs(trade.pnl_pct)
-            self.count_losses += 1
-
-
-@dataclass
-class _OpenPositionState:
-    """Mutable per-run state for the currently open position."""
-    position: Optional[Trade] = None
-    bars_in_trade: int = 0
-    highest_since_entry: float = 0.0
-    lowest_since_entry: float = float('inf')
-    current_mae: float = 0.0
-    current_mfe: float = 0.0
-
-    def reset(self) -> None:
-        self.position = None
-        self.bars_in_trade = 0
-        self.highest_since_entry = 0.0
-        self.lowest_since_entry = float('inf')
-        self.current_mae = 0.0
-        self.current_mfe = 0.0
-
-
 def _estimate_bars_per_year(df: pd.DataFrame) -> int:
     """
     Estimate annualization factor from data frequency.
@@ -423,197 +371,9 @@ class BacktestEngine:
 
         return exit_price, exit_reason
 
-    def _update_open_position_range(self, state: _OpenPositionState, row) -> None:
-        """Refresh price extremes and MAE/MFE for the current open position."""
-        position = state.position
-        if position is None:
-            return
-
-        entry_price = position.entry_price
-        state.highest_since_entry = max(state.highest_since_entry, row['high'])
-        state.lowest_since_entry = min(state.lowest_since_entry, row['low'])
-
-        if position.direction == 'long':
-            state.current_mae = (state.lowest_since_entry - entry_price) / entry_price * 100
-            state.current_mfe = (state.highest_since_entry - entry_price) / entry_price * 100
-        else:
-            state.current_mae = (entry_price - state.highest_since_entry) / entry_price * 100
-            state.current_mfe = (entry_price - state.lowest_since_entry) / entry_price * 100
-
-    def _resolve_exit_for_bar(
-        self,
-        state: _OpenPositionState,
-        row,
-        prev_row,
-        df: pd.DataFrame,
-    ) -> Tuple[Optional[float], Optional[str]]:
-        """Resolve the exit that should execute for the current bar, if any."""
-        position = state.position
-        if position is None:
-            return None, None
-
-        p = self.params
-        exit_price, exit_reason = self._check_stop_exits(
-            position, row, p,
-            state.highest_since_entry, state.lowest_since_entry,
-            state.bars_in_trade, df
-        )
-
-        if p.time_exit_enabled and exit_price is None:
-            max_bars = (
-                p.time_exit_bars_long
-                if position.direction == 'long'
-                else p.time_exit_bars_short
-            )
-            if state.bars_in_trade >= max_bars:
-                exit_price = row['open']
-                exit_reason = 'time_exit'
-
-        if exit_price is None:
-            if position.direction == 'long' and prev_row['exit_long_signal']:
-                exit_price = row['open']
-                exit_reason = 'signal'
-            elif position.direction == 'short' and prev_row['exit_short_signal']:
-                exit_price = row['open']
-                exit_reason = 'signal'
-
-        return exit_price, exit_reason
-
-    def _execute_exit(
-        self,
-        state: _OpenPositionState,
-        exit_price: float,
-        exit_reason: str,
-        bar_idx: int,
-        bar_date: pd.Timestamp,
-        trades: List[Trade],
-        cash: float,
-        recent_stats: _RecentTradeStats,
-    ) -> Tuple[float, str, bool]:
-        """Close the current position and return updated cash and entry-block flag."""
-        position = state.position
-        if position is None:
-            return cash, "", False
-
-        closed_trade, pnl = self._close_position(
-            position, exit_price, exit_reason,
-            bar_idx, bar_date, state.bars_in_trade,
-            state.current_mae, state.current_mfe
-        )
-        trades.append(closed_trade)
-        cash += closed_trade.size_dollars + pnl
-        recent_stats.record_trade(closed_trade)
-
-        if exit_reason in ('signal', 'time_exit'):
-            intrabar_exit = not self.params.allow_same_bar_reversal
-        else:
-            intrabar_exit = True
-
-        exited_direction = closed_trade.direction
-        state.reset()
-        return cash, exited_direction, intrabar_exit
-
-    def _resolve_entry_signals(self, prev_row, exited_direction_this_bar: Optional[str]) -> Tuple[bool, bool]:
-        """Resolve long/short entry signals for the current bar open."""
-        p = self.params
-        long_signal = bool(prev_row['entry_long'])
-        short_signal = bool(prev_row['entry_short'])
-
-        if exited_direction_this_bar == 'long':
-            long_signal = False
-        elif exited_direction_this_bar == 'short':
-            short_signal = False
-
-        if long_signal and short_signal:
-            if p.entry_conflict_mode == EntryConflictMode.SKIP:
-                long_signal = False
-                short_signal = False
-            elif p.entry_conflict_mode == EntryConflictMode.PREFER_SHORT:
-                long_signal = False
-            else:
-                short_signal = False
-
-        return long_signal, short_signal
-
-    def _enter_position_for_bar(
-        self,
-        state: _OpenPositionState,
-        row,
-        bar_idx: int,
-        cash: float,
-        recent_stats: _RecentTradeStats,
-        long_signal: bool,
-        short_signal: bool,
-    ) -> Tuple[float, bool]:
-        """Open a new position for the current bar if an entry signal is active."""
-        position = None
-
-        if long_signal:
-            entry_price = row['open'] * (1 + self.slippage_pct / 100)
-            size_dollars = self._calculate_trade_size_dollars(
-                cash, entry_price, recent_stats.win_rate,
-                recent_stats.realized_avg_win, recent_stats.realized_avg_loss, recent_stats.recent_total
-            )
-            position = Trade(
-                entry_idx=bar_idx, entry_date=row.name,
-                entry_price=entry_price, direction='long',
-                size_dollars=size_dollars,
-            )
-        elif short_signal:
-            entry_price = row['open'] * (1 - self.slippage_pct / 100)
-            size_dollars = self._calculate_trade_size_dollars(
-                cash, entry_price, recent_stats.win_rate,
-                recent_stats.realized_avg_win, recent_stats.realized_avg_loss, recent_stats.recent_total
-            )
-            position = Trade(
-                entry_idx=bar_idx, entry_date=row.name,
-                entry_price=entry_price, direction='short',
-                size_dollars=size_dollars,
-            )
-
-        if position is None:
-            return cash, False
-
-        state.position = position
-        cash -= position.size_dollars
-        state.highest_since_entry = row['high']
-        state.lowest_since_entry = row['low']
-        state.bars_in_trade = 0
-        self._update_open_position_range(state, row)
-        return cash, True
-
-    def _maybe_execute_entry_bar_exit(
-        self,
-        state: _OpenPositionState,
-        row,
-        bar_idx: int,
-        df: pd.DataFrame,
-        trades: List[Trade],
-        cash: float,
-        recent_stats: _RecentTradeStats,
-    ) -> float:
-        """Optionally execute a same-bar stop-style exit on the entry bar."""
-        position = state.position
-        if position is None or not self.params.allow_same_bar_exit:
-            return cash
-
-        entry_exit_price, entry_exit_reason = self._check_stop_exits(
-            position, row, self.params,
-            state.highest_since_entry, state.lowest_since_entry,
-            0, df
-        )
-
-        if entry_exit_price is None:
-            return cash
-
-        cash, _, _ = self._execute_exit(
-            state, entry_exit_price, entry_exit_reason,
-            bar_idx, row.name, trades, cash, recent_stats
-        )
-        return cash
-
     def run(self, df: pd.DataFrame) -> BacktestResults:
         """Run backtest with v8 fixes (gap-through, entry-bar SL, time-exit, Kelly)."""
+        p = self.params
         bars_per_year = _estimate_bars_per_year(df)
 
         # Generate signals
@@ -621,11 +381,21 @@ class BacktestEngine:
 
         trades: List[Trade] = []
         cash = self.initial_capital
-        state = _OpenPositionState()
+        position: Optional[Trade] = None
+        bars_in_trade = 0
         bars_in_market = 0
+        highest_since_entry = 0.0
+        lowest_since_entry = float('inf')
+        current_mae = 0.0
+        current_mfe = 0.0
 
         # ── BUG 4 FIX: Track rolling realized stats for Kelly ──
-        recent_stats = _RecentTradeStats()
+        recent_wins = 0
+        recent_total = 0
+        sum_win_pct = 0.0   # Sum of |pnl_pct| for winners
+        count_wins = 0
+        sum_loss_pct = 0.0  # Sum of |pnl_pct| for losers
+        count_losses = 0
 
         # Mark-to-market and realized equity
         mtm_equity = np.empty(len(df))
@@ -643,57 +413,226 @@ class BacktestEngine:
             # ═══════════════════════════════════════════════════════════════
             # POSITION MANAGEMENT (exits)
             # ═══════════════════════════════════════════════════════════════
-            if state.position is not None:
-                state.bars_in_trade += 1
+            if position is not None:
+                bars_in_trade += 1
                 bars_in_market += 1
-                self._update_open_position_range(state, row)
-                exit_price, exit_reason = self._resolve_exit_for_bar(state, row, prev_row, df)
+                entry_price = position.entry_price
+
+                # Track extremes for trailing stops and MAE/MFE
+                highest_since_entry = max(highest_since_entry, row['high'])
+                lowest_since_entry = min(lowest_since_entry, row['low'])
+
+                if position.direction == 'long':
+                    current_mae = (lowest_since_entry - entry_price) / entry_price * 100
+                    current_mfe = (highest_since_entry - entry_price) / entry_price * 100
+                else:
+                    current_mae = (entry_price - highest_since_entry) / entry_price * 100
+                    current_mfe = (entry_price - lowest_since_entry) / entry_price * 100
+
+                # ─────────────────────────────────────────────────────────
+                # Check all stop-type exits (SL/TP/trailing/ATR)
+                # with gap-through-aware fill prices.
+                # ─────────────────────────────────────────────────────────
+                exit_price, exit_reason = self._check_stop_exits(
+                    position, row, p,
+                    highest_since_entry, lowest_since_entry,
+                    bars_in_trade, df
+                )
+
+                # ── TIME EXIT (BUG 3 FIX: execute at open, not close) ──
+                # The decision to time-exit is known at the start of the
+                # bar (we know bars_in_trade). Execute at open to avoid
+                # look-ahead bias. This is consistent with signal exits.
+                if p.time_exit_enabled and exit_price is None:
+                    max_bars = (p.time_exit_bars_long
+                                if position.direction == 'long'
+                                else p.time_exit_bars_short)
+                    if bars_in_trade >= max_bars:
+                        exit_price = row['open']
+                        exit_reason = 'time_exit'
+
+                # ─────────────────────────────────────────────────────────
+                # Signal exit uses PREVIOUS bar's signal
+                # Same logic as entries: signal on bar[i-1], execute at
+                # bar[i]'s open. No look-ahead.
+                # ─────────────────────────────────────────────────────────
+                if exit_price is None:
+                    if position.direction == 'long' and prev_row['exit_long_signal']:
+                        exit_price = row['open']
+                        exit_reason = 'signal'
+                    elif position.direction == 'short' and prev_row['exit_short_signal']:
+                        exit_price = row['open']
+                        exit_reason = 'signal'
 
                 # ── EXECUTE EXIT ──
                 if exit_price is not None:
-                    cash, exited_direction_this_bar, intrabar_exit = self._execute_exit(
-                        state, exit_price, exit_reason,
-                        i, row.name, trades, cash, recent_stats
+                    position, pnl = self._close_position(
+                        position, exit_price, exit_reason,
+                        i, row.name, bars_in_trade,
+                        current_mae, current_mfe
                     )
+                    trades.append(position)
+                    cash += position.size_dollars + pnl
+
+                    # Update rolling stats for Kelly (BUG 4 FIX)
+                    recent_total += 1
+                    if pnl > 0:
+                        recent_wins += 1
+                        sum_win_pct += abs(position.pnl_pct)
+                        count_wins += 1
+                    else:
+                        sum_loss_pct += abs(position.pnl_pct)
+                        count_losses += 1
+
+                    exited_direction_this_bar = position.direction
+
+                    # Stop-like exits happen after the open, so they always block
+                    # any new entry until the next bar. Signal and time exits
+                    # execute at the open and may optionally allow same-bar
+                    # reversal into the opposite direction.
+                    if exit_reason in ('signal', 'time_exit'):
+                        intrabar_exit = not p.allow_same_bar_reversal
+                    else:
+                        intrabar_exit = True
+
+                    position = None
+                    bars_in_trade = 0
+                    highest_since_entry = 0.0
+                    lowest_since_entry = float('inf')
 
             # ═══════════════════════════════════════════════════════════════
             # ENTRY SIGNALS (previous bar's signal, execute at this bar's open)
             # ═══════════════════════════════════════════════════════════════
-            if state.position is None and not intrabar_exit:
-                long_signal, short_signal = self._resolve_entry_signals(prev_row, exited_direction_this_bar)
-                cash, entered = self._enter_position_for_bar(
-                    state, row, i, cash, recent_stats, long_signal, short_signal
-                )
+            if position is None and not intrabar_exit:
+                win_rate = recent_wins / recent_total if recent_total > 0 else 0.5
+
+                # Compute rolling realized stats for Kelly
+                realized_avg_win = (sum_win_pct / count_wins) if count_wins > 0 else 0.0
+                realized_avg_loss = (sum_loss_pct / count_losses) if count_losses > 0 else 0.0
+
+                long_signal = bool(prev_row['entry_long'])
+                short_signal = bool(prev_row['entry_short'])
+
+                if exited_direction_this_bar == 'long':
+                    long_signal = False
+                elif exited_direction_this_bar == 'short':
+                    short_signal = False
+
+                if long_signal and short_signal:
+                    if p.entry_conflict_mode == EntryConflictMode.SKIP:
+                        long_signal = False
+                        short_signal = False
+                    elif p.entry_conflict_mode == EntryConflictMode.PREFER_SHORT:
+                        long_signal = False
+                    else:
+                        short_signal = False
+
+                entered = False
+                if long_signal:
+                    entry_price = row['open'] * (1 + self.slippage_pct / 100)
+                    size_dollars = self._calculate_trade_size_dollars(
+                        cash, entry_price, win_rate,
+                        realized_avg_win, realized_avg_loss, recent_total
+                    )
+                    position = Trade(
+                        entry_idx=i, entry_date=row.name,
+                        entry_price=entry_price, direction='long',
+                        size_dollars=size_dollars,
+                    )
+                    entered = True
+
+                elif short_signal:
+                    entry_price = row['open'] * (1 - self.slippage_pct / 100)
+                    size_dollars = self._calculate_trade_size_dollars(
+                        cash, entry_price, win_rate,
+                        realized_avg_win, realized_avg_loss, recent_total
+                    )
+                    position = Trade(
+                        entry_idx=i, entry_date=row.name,
+                        entry_price=entry_price, direction='short',
+                        size_dollars=size_dollars,
+                    )
+                    entered = True
 
                 if entered:
-                    cash = self._maybe_execute_entry_bar_exit(
-                        state, row, i, df, trades, cash, recent_stats
-                    )
+                    cash -= position.size_dollars
+                    highest_since_entry = row['high']
+                    lowest_since_entry = row['low']
+
+                    # ─────────────────────────────────────────────────────
+                    # BUG 2 FIX: Optional same-bar stop checks on the ENTRY bar.
+                    #
+                    # We just entered at this bar's open. The bar's
+                    # high/low may already breach our stop or take-profit
+                    # level. In reality, you'd get stopped out immediately.
+                    #
+                    # Update MAE/MFE for entry bar range.
+                    # ─────────────────────────────────────────────────────
+                    if position.direction == 'long':
+                        current_mae = (lowest_since_entry - entry_price) / entry_price * 100
+                        current_mfe = (highest_since_entry - entry_price) / entry_price * 100
+                    else:
+                        current_mae = (entry_price - highest_since_entry) / entry_price * 100
+                        current_mfe = (entry_price - lowest_since_entry) / entry_price * 100
+
+                    bars_in_trade = 0  # Will be incremented next iteration
+
+                    if p.allow_same_bar_exit:
+                        entry_exit_price, entry_exit_reason = self._check_stop_exits(
+                            position, row, p,
+                            highest_since_entry, lowest_since_entry,
+                            0, df  # bars_in_trade=0 on entry bar
+                        )
+
+                        if entry_exit_price is not None:
+                            position, pnl = self._close_position(
+                                position, entry_exit_price, entry_exit_reason,
+                                i, row.name, 0,  # bars_held=0 (same bar)
+                                current_mae, current_mfe
+                            )
+                            trades.append(position)
+                            cash += position.size_dollars + pnl
+
+                            recent_total += 1
+                            if pnl > 0:
+                                recent_wins += 1
+                                sum_win_pct += abs(position.pnl_pct)
+                                count_wins += 1
+                            else:
+                                sum_loss_pct += abs(position.pnl_pct)
+                                count_losses += 1
+
+                            position = None
+                            bars_in_trade = 0
+                            highest_since_entry = 0.0
+                            lowest_since_entry = float('inf')
+                            # intrabar_exit already False, no re-entry this bar
+                            # because we're past the entry block
 
             # ═══════════════════════════════════════════════════════════════
             # MARK-TO-MARKET EQUITY
             # ═══════════════════════════════════════════════════════════════
             unrealized = 0.0
-            if state.position is not None:
-                unrealized = self._unrealized_pnl(state.position, row['close'])
+            if position is not None:
+                unrealized = self._unrealized_pnl(position, row['close'])
 
-            mtm_equity[i] = cash + (state.position.size_dollars if state.position else 0.0) + unrealized
-            realized_equity[i] = cash + (state.position.size_dollars if state.position else 0.0)
+            mtm_equity[i] = cash + (position.size_dollars if position else 0.0) + unrealized
+            realized_equity[i] = cash + (position.size_dollars if position else 0.0)
 
         # ═══════════════════════════════════════════════════════════════════
         # FIX #8: Force-close any open position at end of data
         # ═══════════════════════════════════════════════════════════════════
-        if state.position is not None:
+        if position is not None:
             last_row = df.iloc[-1]
             last_close = last_row['close']
 
-            state.position, pnl = self._close_position(
-                state.position, last_close, 'end_of_data',
-                len(df) - 1, last_row.name, state.bars_in_trade,
-                state.current_mae, state.current_mfe
+            position, pnl = self._close_position(
+                position, last_close, 'end_of_data',
+                len(df) - 1, last_row.name, bars_in_trade,
+                current_mae, current_mfe
             )
-            trades.append(state.position)
-            cash += state.position.size_dollars + pnl
+            trades.append(position)
+            cash += position.size_dollars + pnl
 
             # Update final equity bar to reflect the realized close
             mtm_equity[-1] = cash

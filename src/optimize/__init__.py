@@ -22,14 +22,7 @@ try:
 except ImportError:
     raise ImportError("Install optuna: pip install optuna")
 
-from ..strategy import (
-    StrategyParams,
-    ConditionOperator,
-    TradeDirection,
-    coerce_bool,
-    coerce_condition_operator,
-    coerce_entry_conflict_mode,
-)
+from ..strategy import StrategyParams, TradeDirection, ConditionOperator, EntryConflictMode
 from ..backtest import (
     BacktestEngine,
     BacktestResults,
@@ -469,6 +462,28 @@ class BayesianOptimizer:
         """
         pp = self.pinned_params  # dict of {param_name: fixed_value}
 
+        def p_operator(name: str, default: ConditionOperator) -> ConditionOperator:
+            value = pp.get(name, default)
+            if isinstance(value, ConditionOperator):
+                return value
+            if isinstance(value, str):
+                return ConditionOperator(value.lower())
+            return default
+
+        def p_entry_conflict_mode(name: str, default: EntryConflictMode) -> EntryConflictMode:
+            value = pp.get(name, default)
+            if isinstance(value, EntryConflictMode):
+                return value
+            if isinstance(value, str):
+                return EntryConflictMode(value.lower())
+            return default
+
+        def p_bool(name: str, default: bool) -> bool:
+            value = pp.get(name, default)
+            if isinstance(value, str):
+                return value.lower() in {'1', 'true', 'yes', 'on'}
+            return bool(value)
+
         # Local helpers — check pin first, fall back to Optuna suggest
         def p_int(name: str, lo: int, hi: int) -> int:
             return int(pp[name]) if name in pp else trial.suggest_int(name, lo, hi)
@@ -564,11 +579,11 @@ class BayesianOptimizer:
 
         return StrategyParams(
             trade_direction=self.trade_direction,
-            entry_operator=coerce_condition_operator(pp.get('entry_operator', 'and')),
-            exit_operator=coerce_condition_operator(pp.get('exit_operator', 'or'), default=ConditionOperator.OR),
-            allow_same_bar_exit=coerce_bool(pp.get('allow_same_bar_exit', True), True),
-            allow_same_bar_reversal=coerce_bool(pp.get('allow_same_bar_reversal', False), False),
-            entry_conflict_mode=coerce_entry_conflict_mode(pp.get('entry_conflict_mode', 'skip')),
+            entry_operator=p_operator('entry_operator', ConditionOperator.AND),
+            exit_operator=p_operator('exit_operator', ConditionOperator.OR),
+            allow_same_bar_exit=p_bool('allow_same_bar_exit', True),
+            allow_same_bar_reversal=p_bool('allow_same_bar_reversal', False),
+            entry_conflict_mode=p_entry_conflict_mode('entry_conflict_mode', EntryConflictMode.SKIP),
             pamrp_enabled=pe,
             pamrp_entry_length=peln,
             pamrp_entry_long=pel, pamrp_entry_short=pes, pamrp_exit_long=pxl, pamrp_exit_short=pxs,
