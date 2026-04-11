@@ -42,6 +42,18 @@ _PINNABLE = {
     'time_exit_enabled': [('time_exit_bars', 'Max Bars')],
     'ma_exit_enabled': [('ma_exit_fast', 'Fast'), ('ma_exit_slow', 'Slow')],
     'bbwp_exit_enabled': [('bbwp_exit_threshold', 'Threshold')],
+    'bb_enabled': [('bb_length', 'Length'), ('bb_mult', 'Multiplier'), ('bb_mode', 'Mode')],
+    'stoch_entry_enabled': [('stoch_entry_k_period', 'K Period'), ('stoch_entry_d_period', 'D Period'),
+        ('stoch_entry_slowing', 'Slowing'), ('stoch_entry_oversold', 'Oversold'), ('stoch_entry_overbought', 'Overbought')],
+    'cci_enabled': [('cci_length', 'Length'), ('cci_oversold', 'Oversold'), ('cci_overbought', 'Overbought')],
+    'willr_enabled': [('willr_length', 'Length'), ('willr_oversold', 'Oversold'), ('willr_overbought', 'Overbought')],
+    'obv_enabled': [('obv_ma_length', 'MA Length')],
+    'donchian_enabled': [('donchian_length', 'Length')],
+    'keltner_enabled': [('keltner_length', 'Length'), ('keltner_mult', 'Multiplier')],
+    'psar_enabled': [('psar_af_start', 'AF Start'), ('psar_af_step', 'AF Step'), ('psar_af_max', 'AF Max')],
+    'ichi_enabled': [('ichi_tenkan', 'Tenkan'), ('ichi_kijun', 'Kijun'), ('ichi_senkou_b', 'Senkou B')],
+    'hull_enabled': [('hull_length', 'Length')],
+    'trix_enabled': [('trix_length', 'Length'), ('trix_signal', 'Signal')],
 }
 
 _INDICATOR_LABELS = {
@@ -52,6 +64,11 @@ _INDICATOR_LABELS = {
     'stop_loss_enabled': 'Stop Loss', 'take_profit_enabled': 'Take Profit',
     'trailing_stop_enabled': 'Trailing Stop', 'atr_trailing_enabled': 'ATR Trail',
     'time_exit_enabled': 'Time Exit', 'ma_exit_enabled': 'MA Exit', 'bbwp_exit_enabled': 'BBWP Exit',
+    'bb_enabled': 'Bollinger Bands', 'stoch_entry_enabled': 'Stochastic',
+    'cci_enabled': 'CCI', 'willr_enabled': 'Williams %R', 'obv_enabled': 'OBV',
+    'donchian_enabled': 'Donchian', 'keltner_enabled': 'Keltner',
+    'psar_enabled': 'Parabolic SAR', 'ichi_enabled': 'Ichimoku',
+    'hull_enabled': 'Hull MA', 'trix_enabled': 'TRIX',
 }
 
 _SIDEBAR_TO_OPT_DIRECTION = {

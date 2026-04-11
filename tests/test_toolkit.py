@@ -12,7 +12,12 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data import generate_sample_data
-from src.indicators import pamrp, bbwp, rsi, macd, supertrend, atr, sma, ema
+from src.indicators import (
+    pamrp, bbwp, rsi, macd, supertrend, atr, sma, ema,
+    bollinger_bands, stochastic_oscillator, cci, williams_r,
+    obv, donchian_channel, keltner_channel, parabolic_sar,
+    ichimoku, hull_ma, trix,
+)
 from src.strategy import StrategyParams, SignalGenerator, TradeDirection, ConditionOperator, EntryConflictMode
 from src.backtest import BacktestEngine
 
@@ -541,6 +546,196 @@ class TestDataModule:
         df2 = generate_sample_data(days=50, seed=456)
         
         assert not df1['close'].equals(df2['close'])
+
+
+class TestNewIndicators:
+    """Unit tests for the 11 new entry-filter indicators."""
+
+    @pytest.fixture
+    def df(self):
+        return generate_sample_data(days=300, seed=42)
+
+    # ── Bollinger Bands ────────────────────────────────────────────────────────
+
+    def test_bb_output_length(self, df):
+        upper, lower, mid = bollinger_bands(df['close'], 20, 2.0)
+        assert len(upper) == len(df)
+        assert len(lower) == len(df)
+        assert len(mid) == len(df)
+
+    def test_bb_upper_above_lower(self, df):
+        upper, lower, _ = bollinger_bands(df['close'], 20, 2.0)
+        valid = upper.dropna().index.intersection(lower.dropna().index)
+        assert (upper[valid] >= lower[valid]).all()
+
+    def test_bb_warmup_nan(self, df):
+        upper, _, _ = bollinger_bands(df['close'], 20, 2.0)
+        assert upper.iloc[:19].isna().all()
+        assert not upper.iloc[20:].isna().all()
+
+    def test_bb_squeeze_signal_long(self, df):
+        """When close < lower band at least once, squeeze mode can generate a long."""
+        params = StrategyParams(bb_enabled=True, bb_mode='squeeze',
+                                pamrp_enabled=False, bbwp_enabled=False)
+        result = SignalGenerator(params).generate_all_signals(df)
+        assert 'entry_long' in result.columns
+
+    # ── Stochastic ─────────────────────────────────────────────────────────────
+
+    def test_stoch_output_length(self, df):
+        k, d = stochastic_oscillator(df['high'], df['low'], df['close'])
+        assert len(k) == len(df)
+        assert len(d) == len(df)
+
+    def test_stoch_range(self, df):
+        k, d = stochastic_oscillator(df['high'], df['low'], df['close'])
+        k_valid = k.dropna()
+        assert k_valid.min() >= 0
+        assert k_valid.max() <= 100
+
+    # ── CCI ────────────────────────────────────────────────────────────────────
+
+    def test_cci_output_length(self, df):
+        result = cci(df['high'], df['low'], df['close'], 20)
+        assert len(result) == len(df)
+
+    def test_cci_warmup_nan(self, df):
+        result = cci(df['high'], df['low'], df['close'], 20)
+        assert result.iloc[:19].isna().all()
+
+    def test_cci_signal(self, df):
+        params = StrategyParams(cci_enabled=True, pamrp_enabled=False, bbwp_enabled=False)
+        result = SignalGenerator(params).generate_all_signals(df)
+        assert 'entry_long' in result.columns
+
+    # ── Williams %R ────────────────────────────────────────────────────────────
+
+    def test_willr_range(self, df):
+        result = williams_r(df['high'], df['low'], df['close'], 14)
+        valid = result.dropna()
+        assert valid.min() >= -100
+        assert valid.max() <= 0
+
+    def test_willr_length(self, df):
+        result = williams_r(df['high'], df['low'], df['close'], 14)
+        assert len(result) == len(df)
+
+    def test_willr_warmup_nan(self, df):
+        result = williams_r(df['high'], df['low'], df['close'], 14)
+        assert result.iloc[:13].isna().all()
+
+    # ── OBV ────────────────────────────────────────────────────────────────────
+
+    def test_obv_length(self, df):
+        result = obv(df['close'], df['volume'])
+        assert len(result) == len(df)
+
+    def test_obv_no_nan(self, df):
+        result = obv(df['close'], df['volume'])
+        assert result.isna().sum() == 0
+
+    # ── Donchian Channel ───────────────────────────────────────────────────────
+
+    def test_donchian_upper_above_lower(self, df):
+        upper, lower, _ = donchian_channel(df['high'], df['low'], 20)
+        valid = upper.dropna().index
+        assert (upper[valid] >= lower[valid]).all()
+
+    def test_donchian_length(self, df):
+        upper, lower, mid = donchian_channel(df['high'], df['low'], 20)
+        assert len(upper) == len(df)
+
+    # ── Keltner Channel ────────────────────────────────────────────────────────
+
+    def test_keltner_upper_above_lower(self, df):
+        upper, lower, _ = keltner_channel(df['high'], df['low'], df['close'], 20, 1.5)
+        valid = upper.dropna().index
+        assert (upper[valid] >= lower[valid]).all()
+
+    def test_keltner_length(self, df):
+        upper, lower, mid = keltner_channel(df['high'], df['low'], df['close'], 20, 1.5)
+        assert len(upper) == len(df)
+
+    # ── Parabolic SAR ──────────────────────────────────────────────────────────
+
+    def test_psar_length(self, df):
+        result = parabolic_sar(df['high'], df['low'])
+        assert len(result) == len(df)
+
+    def test_psar_no_nan_after_first(self, df):
+        result = parabolic_sar(df['high'], df['low'])
+        assert result.iloc[1:].isna().sum() == 0
+
+    def test_psar_positive(self, df):
+        result = parabolic_sar(df['high'], df['low'])
+        assert (result.iloc[1:] > 0).all()
+
+    # ── Ichimoku ───────────────────────────────────────────────────────────────
+
+    def test_ichimoku_keys(self, df):
+        result = ichimoku(df['high'], df['low'], df['close'])
+        expected = {'tenkan_sen', 'kijun_sen', 'senkou_a_signal', 'senkou_b_signal',
+                    'senkou_a_display', 'senkou_b_display', 'chikou_span'}
+        assert expected.issubset(set(result.keys()))
+
+    def test_ichimoku_length(self, df):
+        result = ichimoku(df['high'], df['low'], df['close'])
+        assert len(result['tenkan_sen']) == len(df)
+
+    def test_ichimoku_signal_not_shifted(self, df):
+        """senkou_a_signal must not have NaN beyond the warmup period from period alone."""
+        result = ichimoku(df['high'], df['low'], df['close'], 9, 26, 52)
+        # The signal version should have values from bar 51 onward (senkou_b period)
+        assert not result['senkou_a_signal'].iloc[52:].isna().all()
+
+    # ── Hull MA ────────────────────────────────────────────────────────────────
+
+    def test_hull_ma_length(self, df):
+        result = hull_ma(df['close'], 20)
+        assert len(result) == len(df)
+
+    def test_hull_ma_signal(self, df):
+        params = StrategyParams(hull_enabled=True, pamrp_enabled=False, bbwp_enabled=False)
+        result = SignalGenerator(params).generate_all_signals(df)
+        assert 'entry_long' in result.columns
+
+    # ── TRIX ───────────────────────────────────────────────────────────────────
+
+    def test_trix_output_length(self, df):
+        trix_line, sig_line = trix(df['close'], 15, 9)
+        assert len(trix_line) == len(df)
+        assert len(sig_line) == len(df)
+
+    def test_trix_signal(self, df):
+        params = StrategyParams(trix_enabled=True, pamrp_enabled=False, bbwp_enabled=False)
+        result = SignalGenerator(params).generate_all_signals(df)
+        assert 'entry_long' in result.columns
+
+    # ── Integration: multiple new indicators together ──────────────────────────
+
+    def test_multiple_new_indicators_and_mode(self, df):
+        """All new indicators enabled with AND — should produce boolean entry columns."""
+        params = StrategyParams(
+            pamrp_enabled=False, bbwp_enabled=False,
+            bb_enabled=True, cci_enabled=True,
+            entry_operator=ConditionOperator.AND,
+            trade_direction=TradeDirection.BOTH,
+        )
+        result = SignalGenerator(params).generate_all_signals(df)
+        assert result['entry_long'].dtype == bool or result['entry_long'].dtype == object
+        assert result['entry_short'].dtype == bool or result['entry_short'].dtype == object
+
+    def test_multiple_new_indicators_or_mode(self, df):
+        """OR mode: enabling several new indicators should still produce entries."""
+        params = StrategyParams(
+            pamrp_enabled=False, bbwp_enabled=False,
+            bb_enabled=True, willr_enabled=True, hull_enabled=True,
+            entry_operator=ConditionOperator.OR,
+            trade_direction=TradeDirection.BOTH,
+        )
+        result = SignalGenerator(params).generate_all_signals(df)
+        # At least some longs or shorts should fire on 300 bars
+        assert result['entry_long'].any() or result['entry_short'].any()
 
 
 if __name__ == '__main__':

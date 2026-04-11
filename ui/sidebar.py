@@ -255,6 +255,78 @@ def _render_entry_indicators(p: dict) -> None:
             p['macd_slow'] = st.slider("Slow", 15, 40, p['macd_slow'], key="mcs")
             p['macd_signal'] = st.slider("Signal", 5, 15, p['macd_signal'], key="mcsi")
 
+    with st.expander("📈 Bollinger Bands", expanded=False):
+        p['bb_enabled'] = st.toggle("Enable", p['bb_enabled'], key="bbe")
+        if p['bb_enabled']:
+            p['bb_length'] = st.slider("Length", 10, 50, p['bb_length'], key="bbl")
+            p['bb_mult'] = st.slider("Multiplier", 0.5, 4.0, float(p['bb_mult']), 0.5, key="bbm")
+            p['bb_mode'] = st.selectbox("Mode", ["squeeze", "breakout"],
+                index=["squeeze", "breakout"].index(p.get('bb_mode', 'squeeze')), key="bbmd")
+
+    with st.expander("📊 Stochastic", expanded=False):
+        p['stoch_entry_enabled'] = st.toggle("Enable", p['stoch_entry_enabled'], key="stke")
+        if p['stoch_entry_enabled']:
+            p['stoch_entry_k_period'] = st.slider("K Period", 5, 21, p['stoch_entry_k_period'], key="stkk")
+            p['stoch_entry_d_period'] = st.slider("D Period", 2, 5, p['stoch_entry_d_period'], key="stkd")
+            p['stoch_entry_slowing'] = st.slider("Slowing", 1, 5, p['stoch_entry_slowing'], key="stks")
+            p['stoch_entry_oversold'] = st.slider("Oversold", 10, 40, p['stoch_entry_oversold'], key="stkos")
+            p['stoch_entry_overbought'] = st.slider("Overbought", 60, 90, p['stoch_entry_overbought'], key="stkob")
+
+    with st.expander("📊 CCI", expanded=False):
+        p['cci_enabled'] = st.toggle("Enable", p['cci_enabled'], key="ccie")
+        if p['cci_enabled']:
+            p['cci_length'] = st.slider("Length", 10, 40, p['cci_length'], key="ccil")
+            p['cci_oversold'] = st.slider("Oversold", -200, -50, p['cci_oversold'], key="ccios")
+            p['cci_overbought'] = st.slider("Overbought", 50, 200, p['cci_overbought'], key="cciob")
+
+    with st.expander("📊 Williams %R", expanded=False):
+        p['willr_enabled'] = st.toggle("Enable", p['willr_enabled'], key="wre")
+        if p['willr_enabled']:
+            p['willr_length'] = st.slider("Length", 5, 21, p['willr_length'], key="wrl")
+            p['willr_oversold'] = st.slider("Oversold", -95, -60, p['willr_oversold'], key="wros")
+            p['willr_overbought'] = st.slider("Overbought", -40, -5, p['willr_overbought'], key="wrob")
+
+    with st.expander("📊 OBV", expanded=False):
+        p['obv_enabled'] = st.toggle("Enable", p['obv_enabled'], key="obve")
+        if p['obv_enabled']:
+            p['obv_ma_length'] = st.slider("MA Length", 5, 50, p['obv_ma_length'], key="obvm")
+
+    with st.expander("📈 Donchian Channel", expanded=False):
+        p['donchian_enabled'] = st.toggle("Enable", p['donchian_enabled'], key="dche")
+        if p['donchian_enabled']:
+            p['donchian_length'] = st.slider("Length", 10, 50, p['donchian_length'], key="dchl")
+
+    with st.expander("📈 Keltner Channel", expanded=False):
+        p['keltner_enabled'] = st.toggle("Enable", p['keltner_enabled'], key="klte")
+        if p['keltner_enabled']:
+            p['keltner_length'] = st.slider("Length", 10, 50, p['keltner_length'], key="kltl")
+            p['keltner_mult'] = st.slider("Multiplier", 0.5, 4.0, float(p['keltner_mult']), 0.5, key="kltm")
+
+    with st.expander("📈 Parabolic SAR", expanded=False):
+        p['psar_enabled'] = st.toggle("Enable", p['psar_enabled'], key="psre")
+        if p['psar_enabled']:
+            p['psar_af_start'] = st.slider("AF Start", 0.01, 0.1, float(p['psar_af_start']), 0.01, key="psrs")
+            p['psar_af_step'] = st.slider("AF Step", 0.01, 0.1, float(p['psar_af_step']), 0.01, key="psrst")
+            p['psar_af_max'] = st.slider("AF Max", 0.1, 0.5, float(p['psar_af_max']), 0.05, key="psrm")
+
+    with st.expander("📈 Ichimoku Cloud", expanded=False):
+        p['ichi_enabled'] = st.toggle("Enable", p['ichi_enabled'], key="iche")
+        if p['ichi_enabled']:
+            p['ichi_tenkan'] = st.slider("Tenkan", 5, 20, p['ichi_tenkan'], key="icht")
+            p['ichi_kijun'] = st.slider("Kijun", 15, 40, p['ichi_kijun'], key="ichk")
+            p['ichi_senkou_b'] = st.slider("Senkou B", 26, 104, p['ichi_senkou_b'], key="ichsb")
+
+    with st.expander("📈 Hull MA", expanded=False):
+        p['hull_enabled'] = st.toggle("Enable", p['hull_enabled'], key="hule")
+        if p['hull_enabled']:
+            p['hull_length'] = st.slider("Length", 5, 50, p['hull_length'], key="hull")
+
+    with st.expander("📊 TRIX", expanded=False):
+        p['trix_enabled'] = st.toggle("Enable", p['trix_enabled'], key="trxe")
+        if p['trix_enabled']:
+            p['trix_length'] = st.slider("Length", 5, 30, p['trix_length'], key="trxl")
+            p['trix_signal'] = st.slider("Signal", 3, 15, p['trix_signal'], key="trxs")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Visual indicators (display-only)

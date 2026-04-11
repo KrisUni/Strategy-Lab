@@ -28,6 +28,16 @@ def create_heatmap(df, param1, param2, metric, params, capital, commission, slip
         'bbwp_threshold_long': list(range(30, 75, 5)),
         'stop_loss_pct_long': [1, 2, 3, 4, 5, 6, 7, 8],
         'take_profit_pct_long': [2, 4, 6, 8, 10, 12, 14],
+        'bb_length': list(range(10, 55, 5)),
+        'bb_mult': [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+        'cci_length': list(range(10, 45, 5)),
+        'willr_length': list(range(5, 25, 2)),
+        'obv_ma_length': list(range(5, 55, 5)),
+        'donchian_length': list(range(10, 55, 5)),
+        'keltner_length': list(range(10, 50, 5)),
+        'keltner_mult': [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        'hull_length': list(range(5, 55, 5)),
+        'trix_length': list(range(5, 35, 5)),
     }
     r1 = ranges.get(param1, list(range(10, 50, 5)))
     r2 = ranges.get(param2, list(range(10, 50, 5)))
@@ -63,6 +73,9 @@ def render_heatmap_tab() -> None:
     param_options = [
         'pamrp_entry_long', 'pamrp_exit_long',
         'bbwp_threshold_long', 'stop_loss_pct_long', 'take_profit_pct_long',
+        'bb_length', 'bb_mult', 'cci_length', 'willr_length',
+        'obv_ma_length', 'donchian_length', 'keltner_length', 'keltner_mult',
+        'hull_length', 'trix_length',
     ]
     c1, c2, c3 = st.columns(3)
     p1 = c1.selectbox("Param X", param_options, index=0)

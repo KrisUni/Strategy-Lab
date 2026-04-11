@@ -87,6 +87,77 @@ macd:
   signal: 9
   mode: "histogram"  # histogram, crossover, zero
 
+# Bollinger Bands Entry
+bollinger_bands:
+  enabled: false
+  length: 20
+  mult: 2.0
+  mode: "squeeze"  # squeeze (mean-reversion) or breakout
+
+# Stochastic Entry
+stochastic:
+  enabled: false
+  k_period: 14
+  d_period: 3
+  slowing: 3
+  oversold: 20
+  overbought: 80
+
+# CCI Entry
+cci:
+  enabled: false
+  length: 20
+  oversold: -100
+  overbought: 100
+
+# Williams %R Entry
+williams_r:
+  enabled: false
+  length: 14
+  oversold: -80
+  overbought: -20
+
+# OBV Entry
+obv:
+  enabled: false
+  ma_length: 20
+
+# Donchian Channel Entry
+donchian:
+  enabled: false
+  length: 20
+
+# Keltner Channel Entry
+keltner:
+  enabled: false
+  length: 20
+  mult: 1.5
+
+# Parabolic SAR Entry
+parabolic_sar:
+  enabled: false
+  af_start: 0.02
+  af_step: 0.02
+  af_max: 0.2
+
+# Ichimoku Cloud Entry
+ichimoku:
+  enabled: false
+  tenkan: 9
+  kijun: 26
+  senkou_b: 52
+
+# Hull MA Entry
+hull_ma:
+  enabled: false
+  length: 20
+
+# TRIX Entry
+trix:
+  enabled: false
+  length: 15
+  signal: 9
+
 # Session Filter
 session:
   enabled: false

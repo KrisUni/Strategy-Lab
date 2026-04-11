@@ -609,6 +609,335 @@ def rsi_hidden_divergence(
 # ═══════════════════════════════════════════════════════════════════════════════
 # HPDR BANDS  [NEW-2]
 # ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# NEW ENTRY FILTER INDICATORS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def bollinger_bands(
+    close: pd.Series,
+    length: int = 20,
+    mult: float = 2.0,
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Bollinger Bands.
+
+        mid   = SMA(close, length)
+        std   = sample_std(close, length)   # ddof=1, matches TradingView
+        upper = mid + mult × std
+        lower = mid - mult × std
+
+    Returns
+    -------
+    upper, lower, mid
+    """
+    mid   = sma(close, length)
+    std   = close.rolling(window=length).std(ddof=1)
+    upper = mid + mult * std
+    lower = mid - mult * std
+    return upper, lower, mid
+
+
+def stochastic_oscillator(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    k_period: int = 14,
+    d_period: int = 3,
+    slowing: int = 3,
+) -> Tuple[pd.Series, pd.Series]:
+    """
+    Standard Stochastic Oscillator.
+
+        raw_k = (close - lowest_low(k_period)) / (highest_high(k_period) - lowest_low(k_period)) × 100
+        %K    = SMA(raw_k, slowing)
+        %D    = SMA(%K, d_period)
+
+    Returns
+    -------
+    k, d
+    """
+    _assert_aligned(high, low, close)
+    lowest  = low.rolling(window=k_period).min()
+    highest = high.rolling(window=k_period).max()
+    raw_k   = (close - lowest) / (highest - lowest).replace(0, np.nan) * 100
+    k       = sma(raw_k, slowing)
+    d       = sma(k, d_period)
+    return k, d
+
+
+def cci(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    length: int = 20,
+) -> pd.Series:
+    """
+    Commodity Channel Index (Lambert's original definition).
+
+        TP  = (high + low + close) / 3
+        CCI = (TP - SMA(TP, length)) / (0.015 × MeanDev(TP, length))
+
+    The 0.015 constant ensures ~70-80% of values fall within ±100 on
+    normally-distributed data (Lambert, 1980).
+    """
+    _assert_aligned(high, low, close)
+    tp       = (high + low + close) / 3
+    tp_sma   = sma(tp, length)
+    mean_dev = tp.rolling(length).apply(
+        lambda x: np.abs(x - x.mean()).mean(), raw=True
+    )
+    return (tp - tp_sma) / (0.015 * mean_dev)
+
+
+def williams_r(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    length: int = 14,
+) -> pd.Series:
+    """
+    Williams %R (Larry Williams, 1973).
+
+        %R = (highest_high(length) - close) / (highest_high(length) - lowest_low(length)) × -100
+
+    Output range: [-100, 0].
+    Oversold: %R < -80. Overbought: %R > -20.
+    """
+    _assert_aligned(high, low, close)
+    highest = high.rolling(window=length).max()
+    lowest  = low.rolling(window=length).min()
+    return (highest - close) / (highest - lowest).replace(0, np.nan) * -100
+
+
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """
+    On-Balance Volume (Granville, 1963).
+
+        OBV[i] = OBV[i-1] + volume[i]  if close[i] > close[i-1]
+               = OBV[i-1] - volume[i]  if close[i] < close[i-1]
+               = OBV[i-1]              otherwise
+    """
+    _assert_aligned(close, volume)
+    delta     = close.diff()
+    direction = pd.Series(
+        np.where(delta > 0, 1, np.where(delta < 0, -1, 0)),
+        index=close.index,
+    )
+    return (direction * volume).cumsum()
+
+
+def donchian_channel(
+    high: pd.Series,
+    low: pd.Series,
+    length: int = 20,
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Donchian Channel (breakout channel).
+
+        upper = highest_high(length)
+        lower = lowest_low(length)
+        mid   = (upper + lower) / 2
+
+    Returns
+    -------
+    upper, lower, mid
+    """
+    _assert_aligned(high, low)
+    upper = high.rolling(window=length).max()
+    lower = low.rolling(window=length).min()
+    mid   = (upper + lower) / 2
+    return upper, lower, mid
+
+
+def keltner_channel(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    length: int = 20,
+    mult: float = 1.5,
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Keltner Channel (Chester Keltner / Linda Raschke ATR variant).
+
+        mid   = EMA(close, length)
+        upper = mid + mult × ATR(length)
+        lower = mid - mult × ATR(length)
+
+    Returns
+    -------
+    upper, lower, mid
+    """
+    _assert_aligned(high, low, close)
+    mid   = ema(close, length)
+    atr_v = atr(high, low, close, length)
+    upper = mid + mult * atr_v
+    lower = mid - mult * atr_v
+    return upper, lower, mid
+
+
+def parabolic_sar(
+    high: pd.Series,
+    low: pd.Series,
+    af_start: float = 0.02,
+    af_step: float = 0.02,
+    af_max: float = 0.2,
+) -> pd.Series:
+    """
+    Parabolic SAR (Wilder, 1978).
+
+    Iterative state machine — cannot be vectorized.
+
+        SAR[i] = SAR[i-1] + AF × (EP - SAR[i-1])
+        AF increments by af_step each time EP makes a new extreme, capped at af_max.
+
+    Bullish (+1): price above SAR. Bearish (-1): price below SAR.
+    """
+    _assert_aligned(high, low)
+    n      = len(high)
+    high_a = high.to_numpy(dtype=float)
+    low_a  = low.to_numpy(dtype=float)
+    sar    = np.full(n, np.nan)
+
+    trend  = 1          # +1 = bullish, -1 = bearish
+    af     = af_start
+    ep     = high_a[0]
+    sar[0] = low_a[0]
+
+    for i in range(1, n):
+        prev_sar = sar[i - 1]
+
+        if trend == 1:  # bullish
+            sar[i] = prev_sar + af * (ep - prev_sar)
+            sar[i] = min(sar[i], low_a[i - 1])
+            if i >= 2:
+                sar[i] = min(sar[i], low_a[i - 2])
+
+            if low_a[i] < sar[i]:  # reversal to bearish
+                trend  = -1
+                sar[i] = ep
+                ep     = low_a[i]
+                af     = af_start
+            else:
+                if high_a[i] > ep:
+                    ep = high_a[i]
+                    af = min(af + af_step, af_max)
+        else:  # bearish
+            sar[i] = prev_sar + af * (ep - prev_sar)
+            sar[i] = max(sar[i], high_a[i - 1])
+            if i >= 2:
+                sar[i] = max(sar[i], high_a[i - 2])
+
+            if high_a[i] > sar[i]:  # reversal to bullish
+                trend  = 1
+                sar[i] = ep
+                ep     = high_a[i]
+                af     = af_start
+            else:
+                if low_a[i] < ep:
+                    ep = low_a[i]
+                    af = min(af + af_step, af_max)
+
+    return pd.Series(sar, index=high.index)
+
+
+def ichimoku(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    tenkan_period: int = 9,
+    kijun_period: int = 26,
+    senkou_b_period: int = 52,
+) -> Dict[str, pd.Series]:
+    """
+    Ichimoku Kinko Hyo Cloud.
+
+        Tenkan-sen  = (highest_high(tenkan) + lowest_low(tenkan)) / 2
+        Kijun-sen   = (highest_high(kijun)  + lowest_low(kijun))  / 2
+        Senkou A    = (Tenkan + Kijun) / 2
+        Senkou B    = (highest_high(senkou_b) + lowest_low(senkou_b)) / 2
+        Chikou span = close shifted backward kijun_period bars
+
+    LOOK-AHEAD BIAS NOTE
+    ────────────────────
+    The display Senkou spans are shifted forward by kijun_period bars.
+    For signal generation, NON-SHIFTED versions are used (senkou_a_signal /
+    senkou_b_signal) so that we compare current price to the cloud as computed
+    with only past data — no look-ahead bias.
+
+    Returns
+    -------
+    Dict with keys:
+        tenkan_sen, kijun_sen,
+        senkou_a_signal, senkou_b_signal   — non-shifted, for entry logic
+        senkou_a_display, senkou_b_display — shifted forward, for chart only
+        chikou_span
+    """
+    _assert_aligned(high, low, close)
+
+    def mid_price(h: pd.Series, l: pd.Series, period: int) -> pd.Series:
+        return (h.rolling(period).max() + l.rolling(period).min()) / 2
+
+    tenkan   = mid_price(high, low, tenkan_period)
+    kijun    = mid_price(high, low, kijun_period)
+    senkou_a = (tenkan + kijun) / 2
+    senkou_b = mid_price(high, low, senkou_b_period)
+    chikou   = close.shift(-kijun_period)
+
+    return {
+        'tenkan_sen':       tenkan,
+        'kijun_sen':        kijun,
+        'senkou_a_signal':  senkou_a,                       # non-shifted — use for signals
+        'senkou_b_signal':  senkou_b,                       # non-shifted — use for signals
+        'senkou_a_display': senkou_a.shift(kijun_period),   # shifted forward — chart only
+        'senkou_b_display': senkou_b.shift(kijun_period),   # shifted forward — chart only
+        'chikou_span':      chikou,
+    }
+
+
+def hull_ma(close: pd.Series, length: int = 20) -> pd.Series:
+    """
+    Hull Moving Average (Alan Hull, 2005).
+
+        HMA = WMA(2 × WMA(close, length/2) - WMA(close, length), sqrt(length))
+
+    Significantly less lag than EMA of the same period.
+    """
+    half_len = max(int(length / 2), 1)
+    sqrt_len = max(int(np.sqrt(length)), 1)
+    wma_half = wma(close, half_len)
+    wma_full = wma(close, length)
+    diff     = 2 * wma_half - wma_full
+    return wma(diff, sqrt_len)
+
+
+def trix(
+    close: pd.Series,
+    length: int = 15,
+    signal: int = 9,
+) -> Tuple[pd.Series, pd.Series]:
+    """
+    TRIX — Triple Exponential Moving Average Rate-of-Change.
+
+        EMA1   = EMA(close, length)
+        EMA2   = EMA(EMA1, length)
+        EMA3   = EMA(EMA2, length)
+        TRIX   = (EMA3 - EMA3.shift(1)) / EMA3.shift(1) × 100
+        Signal = EMA(TRIX, signal)
+
+    Long when TRIX crosses above Signal; short when crosses below.
+
+    Returns
+    -------
+    trix_line, signal_line
+    """
+    ema1      = ema(close, length)
+    ema2      = ema(ema1,  length)
+    ema3      = ema(ema2,  length)
+    trix_line = (ema3 - ema3.shift(1)) / ema3.shift(1).replace(0, np.nan) * 100
+    sig_line  = ema(trix_line, signal)
+    return trix_line, sig_line
+
+
 def hpdr_bands(
     close: pd.Series,
     lookback: int = 252,

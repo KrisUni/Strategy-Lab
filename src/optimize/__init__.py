@@ -57,6 +57,18 @@ _ENTRY_PARAM_PREFIXES = (
     'volume_ma_length', 'volume_multiplier',
     'supertrend_period', 'supertrend_multiplier',
     'macd_fast', 'macd_slow', 'macd_signal',
+    'bb_length', 'bb_mult', 'bb_mode',
+    'stoch_entry_k_period', 'stoch_entry_d_period', 'stoch_entry_slowing',
+    'stoch_entry_oversold', 'stoch_entry_overbought',
+    'cci_length', 'cci_oversold', 'cci_overbought',
+    'willr_length', 'willr_oversold', 'willr_overbought',
+    'obv_ma_length',
+    'donchian_length',
+    'keltner_length', 'keltner_mult',
+    'psar_af_start', 'psar_af_step', 'psar_af_max',
+    'ichi_tenkan', 'ichi_kijun', 'ichi_senkou_b',
+    'hull_length',
+    'trix_length', 'trix_signal',
 )
 
 # Exit/risk params — adapting between regimes is EXPECTED, not a red flag
@@ -183,6 +195,17 @@ def _count_active_params(
         'bbwp_exit_enabled': 1,
         'pamrp_exit_enabled': 3,
         'stoch_rsi_exit_enabled': 0,
+        'bb_enabled': 3,
+        'stoch_entry_enabled': 5,
+        'cci_enabled': 3,
+        'willr_enabled': 3,
+        'obv_enabled': 1,
+        'donchian_enabled': 1,
+        'keltner_enabled': 2,
+        'psar_enabled': 3,
+        'ichi_enabled': 3,
+        'hull_enabled': 1,
+        'trix_enabled': 2,
     }
     total = sum(
         dims_per_indicator.get(k, 2)
@@ -546,6 +569,55 @@ class BayesianOptimizer:
         mcs  = p_int('macd_slow',   20,  30) if mce else 26
         mcsi = p_int('macd_signal',  6,  12) if mce else 9
 
+        bbe  = ef.get('bb_enabled', False)
+        bbl  = p_int('bb_length', 10, 50) if bbe else 20
+        bbm  = p_float('bb_mult', 0.5, 4.0) if bbe else 2.0
+        bbmd = p_cat('bb_mode', ['squeeze', 'breakout']) if bbe else 'squeeze'
+
+        stke  = ef.get('stoch_entry_enabled', False)
+        stkk  = p_int('stoch_entry_k_period', 5, 21) if stke else 14
+        stkd  = p_int('stoch_entry_d_period', 2, 5)  if stke else 3
+        stks  = p_int('stoch_entry_slowing', 1, 5)   if stke else 3
+        stkos = p_int('stoch_entry_oversold', 10, 35) if stke else 20
+        stkob = p_int('stoch_entry_overbought', 65, 90) if stke else 80
+
+        ccie  = ef.get('cci_enabled', False)
+        ccil  = p_int('cci_length', 10, 40)    if ccie else 20
+        ccios = p_int('cci_oversold', -200, -50) if ccie else -100
+        cciob = p_int('cci_overbought', 50, 200) if ccie else 100
+
+        wre  = ef.get('willr_enabled', False)
+        wrl  = p_int('willr_length', 5, 21)       if wre else 14
+        wros = p_int('willr_oversold', -95, -60)  if wre else -80
+        wrob = p_int('willr_overbought', -40, -5) if wre else -20
+
+        obve = ef.get('obv_enabled', False)
+        obvm = p_int('obv_ma_length', 5, 50) if obve else 20
+
+        dche = ef.get('donchian_enabled', False)
+        dchl = p_int('donchian_length', 10, 50) if dche else 20
+
+        klte = ef.get('keltner_enabled', False)
+        kltl = p_int('keltner_length', 10, 50)    if klte else 20
+        kltm = p_float('keltner_mult', 0.5, 4.0)  if klte else 1.5
+
+        psre = ef.get('psar_enabled', False)
+        psrs = p_float('psar_af_start', 0.01, 0.1) if psre else 0.02
+        psrst = p_float('psar_af_step', 0.01, 0.1) if psre else 0.02
+        psrm = p_float('psar_af_max', 0.1, 0.5)   if psre else 0.2
+
+        iche = ef.get('ichi_enabled', False)
+        icht = p_int('ichi_tenkan', 5, 20)    if iche else 9
+        ichk = p_int('ichi_kijun', 15, 40)   if iche else 26
+        ichsb = p_int('ichi_senkou_b', 26, 104) if iche else 52
+
+        hule = ef.get('hull_enabled', False)
+        hull = p_int('hull_length', 5, 50) if hule else 20
+
+        trxe = ef.get('trix_enabled', False)
+        trxl = p_int('trix_length', 5, 30)  if trxe else 15
+        trxs = p_int('trix_signal', 3, 15)  if trxe else 9
+
         sle = ef.get('stop_loss_enabled', True)
         sll = p_float('stop_loss_pct_long',  1.0, 10.0) if sle else 3.0
         sls = p_float('stop_loss_pct_short', 1.0, 10.0) if sle else 3.0
@@ -604,6 +676,18 @@ class BayesianOptimizer:
             time_exit_enabled=txe, time_exit_bars_long=txb, time_exit_bars_short=txb,
             ma_exit_enabled=mxe, ma_exit_fast=mxf, ma_exit_slow=mxs,
             bbwp_exit_enabled=bxe, bbwp_exit_threshold=bxt,
+            bb_enabled=bbe, bb_length=bbl, bb_mult=bbm, bb_mode=bbmd,
+            stoch_entry_enabled=stke, stoch_entry_k_period=stkk, stoch_entry_d_period=stkd,
+            stoch_entry_slowing=stks, stoch_entry_oversold=stkos, stoch_entry_overbought=stkob,
+            cci_enabled=ccie, cci_length=ccil, cci_oversold=ccios, cci_overbought=cciob,
+            willr_enabled=wre, willr_length=wrl, willr_oversold=wros, willr_overbought=wrob,
+            obv_enabled=obve, obv_ma_length=obvm,
+            donchian_enabled=dche, donchian_length=dchl,
+            keltner_enabled=klte, keltner_length=kltl, keltner_mult=kltm,
+            psar_enabled=psre, psar_af_start=psrs, psar_af_step=psrst, psar_af_max=psrm,
+            ichi_enabled=iche, ichi_tenkan=icht, ichi_kijun=ichk, ichi_senkou_b=ichsb,
+            hull_enabled=hule, hull_length=hull,
+            trix_enabled=trxe, trix_length=trxl, trix_signal=trxs,
         )
 
     # ── Optuna study runner ───────────────────────────────────────────────────

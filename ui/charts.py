@@ -173,6 +173,28 @@ def create_price_chart_with_trades(
             sub_panel_inds.append('macd')
         if p.get('stoch_rsi_exit_enabled') and 'stoch_k' in idf.columns:
             sub_panel_inds.append('stoch')
+        if p.get('bb_enabled') and 'bb_upper' in idf.columns:
+            overlay_inds.append('bb')
+        if p.get('stoch_entry_enabled') and 'stoch_entry_k' in idf.columns:
+            sub_panel_inds.append('stoch_entry')
+        if p.get('cci_enabled') and 'cci' in idf.columns:
+            sub_panel_inds.append('cci')
+        if p.get('willr_enabled') and 'willr' in idf.columns:
+            sub_panel_inds.append('willr')
+        if p.get('obv_enabled') and 'obv' in idf.columns:
+            sub_panel_inds.append('obv')
+        if p.get('donchian_enabled') and 'donchian_upper' in idf.columns:
+            overlay_inds.append('donchian')
+        if p.get('keltner_enabled') and 'keltner_upper' in idf.columns:
+            overlay_inds.append('keltner')
+        if p.get('psar_enabled') and 'psar' in idf.columns:
+            overlay_inds.append('psar')
+        if p.get('ichi_enabled') and 'ichi_tenkan_sen' in idf.columns:
+            overlay_inds.append('ichi')
+        if p.get('hull_enabled') and 'hull_ma' in idf.columns:
+            overlay_inds.append('hull')
+        if p.get('trix_enabled') and 'trix_line' in idf.columns:
+            sub_panel_inds.append('trix')
 
     n_sub = len(sub_panel_inds)
     use_subplots = n_sub > 0
@@ -351,6 +373,63 @@ def create_price_chart_with_trades(
                 line=dict(color='#a855f7', width=1.2, dash='dash'),
                 name='VWAP', showlegend=True), **r1)
 
+        if 'bb' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['bb_upper'], mode='lines',
+                line=dict(color='#8b5cf6', width=1), name='BB Upper', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['bb_lower'], mode='lines',
+                line=dict(color='#8b5cf6', width=1), fill='tonexty',
+                fillcolor='rgba(139,92,246,0.08)', name='BB Lower', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['bb_mid'], mode='lines',
+                line=dict(color='rgba(139,92,246,0.5)', width=0.8, dash='dot'),
+                name='BB Mid', showlegend=False), **r1)
+
+        if 'donchian' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['donchian_upper'], mode='lines',
+                line=dict(color='#06b6d4', width=1), name='DC Upper', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['donchian_lower'], mode='lines',
+                line=dict(color='#06b6d4', width=1), fill='tonexty',
+                fillcolor='rgba(6,182,212,0.06)', name='DC Lower', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['donchian_mid'], mode='lines',
+                line=dict(color='rgba(6,182,212,0.4)', width=0.8, dash='dot'),
+                name='DC Mid', showlegend=False), **r1)
+
+        if 'keltner' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['keltner_upper'], mode='lines',
+                line=dict(color='#f59e0b', width=1), name='KC Upper', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['keltner_lower'], mode='lines',
+                line=dict(color='#f59e0b', width=1), fill='tonexty',
+                fillcolor='rgba(245,158,11,0.07)', name='KC Lower', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['keltner_mid'], mode='lines',
+                line=dict(color='rgba(245,158,11,0.4)', width=0.8, dash='dot'),
+                name='KC Mid', showlegend=False), **r1)
+
+        if 'psar' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['psar'], mode='markers',
+                marker=dict(color='#fb923c', size=3, symbol='circle'),
+                name='PSAR', showlegend=True), **r1)
+
+        if 'hull' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['hull_ma'], mode='lines',
+                line=dict(color='#34d399', width=1.2),
+                name=f"HMA({p.get('hull_length', 20)})", showlegend=True), **r1)
+
+        if 'ichi' in overlay_inds:
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['ichi_tenkan_sen'], mode='lines',
+                line=dict(color='#38bdf8', width=1),
+                name='Tenkan', showlegend=True), **r1)
+            fig.add_trace(go.Scatter(x=idf.index, y=idf['ichi_kijun_sen'], mode='lines',
+                line=dict(color='#fb7185', width=1),
+                name='Kijun', showlegend=True), **r1)
+            # Use display-shifted spans for chart (forward-shifted as per Ichimoku convention)
+            if 'ichi_senkou_a_disp' in idf.columns:
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['ichi_senkou_a_disp'], mode='lines',
+                    line=dict(color='rgba(16,185,129,0.6)', width=0.8),
+                    name='Senkou A', showlegend=True), **r1)
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['ichi_senkou_b_disp'], mode='lines',
+                    line=dict(color='rgba(239,68,68,0.6)', width=0.8),
+                    fill='tonexty', fillcolor='rgba(100,116,139,0.12)',
+                    name='Senkou B', showlegend=True), **r1)
+
     # ── Oscillator sub-panels ─────────────────────────────────────────────────
     if idf is not None:
         for i, panel_name in enumerate(sub_panel_inds):
@@ -474,6 +553,64 @@ def create_price_chart_with_trades(
                     line_color='rgba(16,185,129,0.6)', row=row, col=1)
                 fig.update_yaxes(title_text='Stoch RSI', range=[0, 100],
                     title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'stoch_entry':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_entry_k'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='Stoch %K', showlegend=True), **rn)
+                if 'stoch_entry_d' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_entry_d'], mode='lines',
+                        line=dict(color='#f59e0b', width=1),
+                        name='Stoch %D', showlegend=True), **rn)
+                fig.add_hline(y=p.get('stoch_entry_overbought', 80), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('stoch_entry_oversold', 20), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='Stoch', range=[0, 100],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'cci':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['cci'], mode='lines',
+                    line=dict(color='#c084fc', width=1.2),
+                    name='CCI', showlegend=True), **rn)
+                fig.add_hline(y=p.get('cci_overbought', 100), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('cci_oversold', -100), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.add_hline(y=0, line_color='rgba(255,255,255,0.15)', row=row, col=1)
+                fig.update_yaxes(title_text='CCI', title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'willr':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['willr'], mode='lines',
+                    line=dict(color='#fb923c', width=1.2),
+                    name='Williams %R', showlegend=True), **rn)
+                fig.add_hline(y=p.get('willr_overbought', -20), line_dash='dash',
+                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
+                fig.add_hline(y=p.get('willr_oversold', -80), line_dash='dash',
+                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
+                fig.update_yaxes(title_text='%R', range=[-100, 0],
+                    title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'obv':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['obv'], mode='lines',
+                    line=dict(color='#34d399', width=1.2),
+                    name='OBV', showlegend=True), **rn)
+                if 'obv_ma' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['obv_ma'], mode='lines',
+                        line=dict(color='#f59e0b', width=1, dash='dash'),
+                        name='OBV MA', showlegend=True), **rn)
+                fig.update_yaxes(title_text='OBV', title_font=dict(size=8), row=row, col=1)
+
+            elif panel_name == 'trix':
+                fig.add_trace(go.Scatter(x=idf.index, y=idf['trix_line'], mode='lines',
+                    line=dict(color='#60a5fa', width=1.2),
+                    name='TRIX', showlegend=True), **rn)
+                if 'trix_signal_line' in idf.columns:
+                    fig.add_trace(go.Scatter(x=idf.index, y=idf['trix_signal_line'], mode='lines',
+                        line=dict(color='#f59e0b', width=1),
+                        name='TRIX Signal', showlegend=True), **rn)
+                fig.add_hline(y=0, line_color='rgba(255,255,255,0.15)', row=row, col=1)
+                fig.update_yaxes(title_text='TRIX', title_font=dict(size=8), row=row, col=1)
 
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
     price_min = float(df['low'].min())

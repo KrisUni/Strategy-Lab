@@ -25,7 +25,10 @@ from enum import Enum
 
 from ..indicators import (
     pamrp, bbwp, sma, ema, rsi, stoch_rsi, adx, atr,
-    supertrend, vwap, macd, ma
+    supertrend, vwap, macd, ma,
+    bollinger_bands, stochastic_oscillator, cci, williams_r,
+    obv, donchian_channel, keltner_channel, parabolic_sar,
+    ichimoku, hull_ma, trix,
 )
 
 
@@ -118,6 +121,66 @@ class StrategyParams:
     macd_slow: int = 26
     macd_signal: int = 9
     macd_mode: str = "histogram"
+
+    # Bollinger Bands Entry
+    bb_enabled: bool = False
+    bb_length: int = 20
+    bb_mult: float = 2.0
+    bb_mode: str = 'squeeze'   # 'squeeze' or 'breakout'
+
+    # Stochastic Entry
+    stoch_entry_enabled: bool = False
+    stoch_entry_k_period: int = 14
+    stoch_entry_d_period: int = 3
+    stoch_entry_slowing: int = 3
+    stoch_entry_oversold: int = 20
+    stoch_entry_overbought: int = 80
+
+    # CCI Entry
+    cci_enabled: bool = False
+    cci_length: int = 20
+    cci_oversold: int = -100
+    cci_overbought: int = 100
+
+    # Williams %R Entry
+    willr_enabled: bool = False
+    willr_length: int = 14
+    willr_oversold: int = -80
+    willr_overbought: int = -20
+
+    # OBV Entry
+    obv_enabled: bool = False
+    obv_ma_length: int = 20
+
+    # Donchian Channel Entry
+    donchian_enabled: bool = False
+    donchian_length: int = 20
+
+    # Keltner Channel Entry
+    keltner_enabled: bool = False
+    keltner_length: int = 20
+    keltner_mult: float = 1.5
+
+    # Parabolic SAR Entry
+    psar_enabled: bool = False
+    psar_af_start: float = 0.02
+    psar_af_step: float = 0.02
+    psar_af_max: float = 0.2
+
+    # Ichimoku Cloud Entry
+    ichi_enabled: bool = False
+    ichi_tenkan: int = 9
+    ichi_kijun: int = 26
+    ichi_senkou_b: int = 52
+
+    # Hull MA Entry
+    hull_enabled: bool = False
+    hull_length: int = 20
+
+    # TRIX Entry
+    trix_enabled: bool = False
+    trix_length: int = 15
+    trix_signal: int = 9
 
     # Stop Loss
     stop_loss_enabled: bool = True
@@ -299,6 +362,74 @@ class SignalGenerator:
                 df['close'], p.macd_fast, p.macd_slow, p.macd_signal
             )
 
+        # Bollinger Bands
+        if p.bb_enabled:
+            df['bb_upper'], df['bb_lower'], df['bb_mid'] = bollinger_bands(
+                df['close'], p.bb_length, p.bb_mult
+            )
+
+        # Stochastic Entry
+        if p.stoch_entry_enabled:
+            df['stoch_entry_k'], df['stoch_entry_d'] = stochastic_oscillator(
+                df['high'], df['low'], df['close'],
+                p.stoch_entry_k_period, p.stoch_entry_d_period, p.stoch_entry_slowing,
+            )
+
+        # CCI
+        if p.cci_enabled:
+            df['cci'] = cci(df['high'], df['low'], df['close'], p.cci_length)
+
+        # Williams %R
+        if p.willr_enabled:
+            df['willr'] = williams_r(df['high'], df['low'], df['close'], p.willr_length)
+
+        # OBV
+        if p.obv_enabled and 'volume' in df.columns:
+            df['obv'] = obv(df['close'], df['volume'])
+            df['obv_ma'] = sma(df['obv'], p.obv_ma_length)
+
+        # Donchian Channel
+        if p.donchian_enabled:
+            df['donchian_upper'], df['donchian_lower'], df['donchian_mid'] = donchian_channel(
+                df['high'], df['low'], p.donchian_length
+            )
+
+        # Keltner Channel
+        if p.keltner_enabled:
+            df['keltner_upper'], df['keltner_lower'], df['keltner_mid'] = keltner_channel(
+                df['high'], df['low'], df['close'], p.keltner_length, p.keltner_mult
+            )
+
+        # Parabolic SAR
+        if p.psar_enabled:
+            df['psar'] = parabolic_sar(
+                df['high'], df['low'], p.psar_af_start, p.psar_af_step, p.psar_af_max
+            )
+
+        # Ichimoku Cloud
+        if p.ichi_enabled:
+            ichi_result = ichimoku(
+                df['high'], df['low'], df['close'],
+                p.ichi_tenkan, p.ichi_kijun, p.ichi_senkou_b,
+            )
+            df['ichi_tenkan_sen']    = ichi_result['tenkan_sen']
+            df['ichi_kijun_sen']     = ichi_result['kijun_sen']
+            df['ichi_senkou_a']      = ichi_result['senkou_a_signal']   # non-shifted for signals
+            df['ichi_senkou_b_line'] = ichi_result['senkou_b_signal']   # non-shifted for signals
+            df['ichi_senkou_a_disp'] = ichi_result['senkou_a_display']  # shifted for chart
+            df['ichi_senkou_b_disp'] = ichi_result['senkou_b_display']  # shifted for chart
+            df['ichi_chikou']        = ichi_result['chikou_span']
+
+        # Hull MA
+        if p.hull_enabled:
+            df['hull_ma'] = hull_ma(df['close'], p.hull_length)
+
+        # TRIX
+        if p.trix_enabled:
+            df['trix_line'], df['trix_signal_line'] = trix(
+                df['close'], p.trix_length, p.trix_signal
+            )
+
         # ATR (for trailing stop)
         if p.atr_trailing_enabled:
             df['atr'] = atr(df['high'], df['low'], df['close'], p.atr_length)
@@ -381,6 +512,74 @@ class SignalGenerator:
                 short_mask = df['macd'] < 0
             long_masks.append(long_mask)
             short_masks.append(short_mask)
+
+        # Bollinger Bands
+        if p.bb_enabled and 'bb_upper' in df.columns:
+            if p.bb_mode == 'squeeze':
+                long_masks.append(df['close'] < df['bb_lower'])
+                short_masks.append(df['close'] > df['bb_upper'])
+            else:  # breakout
+                long_masks.append(df['close'] > df['bb_upper'])
+                short_masks.append(df['close'] < df['bb_lower'])
+
+        # Stochastic Entry — cross into oversold/overbought
+        if p.stoch_entry_enabled and 'stoch_entry_k' in df.columns:
+            k = df['stoch_entry_k']
+            long_masks.append((k < p.stoch_entry_oversold) & (k > k.shift(1)))
+            short_masks.append((k > p.stoch_entry_overbought) & (k < k.shift(1)))
+
+        # CCI
+        if p.cci_enabled and 'cci' in df.columns:
+            long_masks.append(df['cci'] < p.cci_oversold)
+            short_masks.append(df['cci'] > p.cci_overbought)
+
+        # Williams %R
+        if p.willr_enabled and 'willr' in df.columns:
+            long_masks.append(df['willr'] < p.willr_oversold)
+            short_masks.append(df['willr'] > p.willr_overbought)
+
+        # OBV
+        if p.obv_enabled and 'obv_ma' in df.columns:
+            long_masks.append(df['obv'] > df['obv_ma'])
+            short_masks.append(df['obv'] < df['obv_ma'])
+
+        # Donchian Channel — breakout
+        if p.donchian_enabled and 'donchian_upper' in df.columns:
+            long_masks.append(df['close'] > df['donchian_upper'].shift(1))
+            short_masks.append(df['close'] < df['donchian_lower'].shift(1))
+
+        # Keltner Channel — mean reversion
+        if p.keltner_enabled and 'keltner_upper' in df.columns:
+            long_masks.append(df['close'] < df['keltner_lower'])
+            short_masks.append(df['close'] > df['keltner_upper'])
+
+        # Parabolic SAR
+        if p.psar_enabled and 'psar' in df.columns:
+            long_masks.append(df['close'] > df['psar'])
+            short_masks.append(df['close'] < df['psar'])
+
+        # Ichimoku Cloud — price vs non-shifted cloud + tenkan/kijun cross
+        if p.ichi_enabled and 'ichi_senkou_a' in df.columns:
+            cloud_top    = df[['ichi_senkou_a', 'ichi_senkou_b_line']].max(axis=1)
+            cloud_bottom = df[['ichi_senkou_a', 'ichi_senkou_b_line']].min(axis=1)
+            long_masks.append(
+                (df['close'] > cloud_top) & (df['ichi_tenkan_sen'] > df['ichi_kijun_sen'])
+            )
+            short_masks.append(
+                (df['close'] < cloud_bottom) & (df['ichi_tenkan_sen'] < df['ichi_kijun_sen'])
+            )
+
+        # Hull MA — direction
+        if p.hull_enabled and 'hull_ma' in df.columns:
+            long_masks.append(df['hull_ma'] > df['hull_ma'].shift(1))
+            short_masks.append(df['hull_ma'] < df['hull_ma'].shift(1))
+
+        # TRIX — signal line crossover
+        if p.trix_enabled and 'trix_line' in df.columns:
+            trix_above = df['trix_line'] > df['trix_signal_line']
+            trix_above_prev = df['trix_line'].shift(1) > df['trix_signal_line'].shift(1)
+            long_masks.append(trix_above & ~trix_above_prev)
+            short_masks.append(~trix_above & trix_above_prev)
 
         long_signal = self._combine_condition_masks(long_masks, p.entry_operator, df.index)
         short_signal = self._combine_condition_masks(short_masks, p.entry_operator, df.index)

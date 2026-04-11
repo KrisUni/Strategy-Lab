@@ -48,6 +48,19 @@ PARAM_TO_WIDGET_KEY: Dict[str, str] = {
     'time_exit_enabled': 'txe', 'time_exit_bars': 'txb',
     'ma_exit_enabled': 'mxe', 'ma_exit_fast': 'mxf', 'ma_exit_slow': 'mxs',
     'bbwp_exit_enabled': 'bxe', 'bbwp_exit_threshold': 'bxt',
+    # New entry filters
+    'bb_enabled': 'bbe', 'bb_length': 'bbl', 'bb_mult': 'bbm', 'bb_mode': 'bbmd',
+    'stoch_entry_enabled': 'stke', 'stoch_entry_k_period': 'stkk', 'stoch_entry_d_period': 'stkd',
+    'stoch_entry_slowing': 'stks', 'stoch_entry_oversold': 'stkos', 'stoch_entry_overbought': 'stkob',
+    'cci_enabled': 'ccie', 'cci_length': 'ccil', 'cci_oversold': 'ccios', 'cci_overbought': 'cciob',
+    'willr_enabled': 'wre', 'willr_length': 'wrl', 'willr_oversold': 'wros', 'willr_overbought': 'wrob',
+    'obv_enabled': 'obve', 'obv_ma_length': 'obvm',
+    'donchian_enabled': 'dche', 'donchian_length': 'dchl',
+    'keltner_enabled': 'klte', 'keltner_length': 'kltl', 'keltner_mult': 'kltm',
+    'psar_enabled': 'psre', 'psar_af_start': 'psrs', 'psar_af_step': 'psrst', 'psar_af_max': 'psrm',
+    'ichi_enabled': 'iche', 'ichi_tenkan': 'icht', 'ichi_kijun': 'ichk', 'ichi_senkou_b': 'ichsb',
+    'hull_enabled': 'hule', 'hull_length': 'hull',
+    'trix_enabled': 'trxe', 'trix_length': 'trxl', 'trix_signal': 'trxs',
 }
 
 
@@ -132,6 +145,29 @@ def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
         ma_exit_enabled=p.get('ma_exit_enabled', False), ma_exit_fast=p.get('ma_exit_fast', 10),
         ma_exit_slow=p.get('ma_exit_slow', 20),
         bbwp_exit_enabled=p.get('bbwp_exit_enabled', False), bbwp_exit_threshold=p.get('bbwp_exit_threshold', 80),
+        bb_enabled=p.get('bb_enabled', False), bb_length=p.get('bb_length', 20),
+        bb_mult=p.get('bb_mult', 2.0), bb_mode=p.get('bb_mode', 'squeeze'),
+        stoch_entry_enabled=p.get('stoch_entry_enabled', False),
+        stoch_entry_k_period=p.get('stoch_entry_k_period', 14),
+        stoch_entry_d_period=p.get('stoch_entry_d_period', 3),
+        stoch_entry_slowing=p.get('stoch_entry_slowing', 3),
+        stoch_entry_oversold=p.get('stoch_entry_oversold', 20),
+        stoch_entry_overbought=p.get('stoch_entry_overbought', 80),
+        cci_enabled=p.get('cci_enabled', False), cci_length=p.get('cci_length', 20),
+        cci_oversold=p.get('cci_oversold', -100), cci_overbought=p.get('cci_overbought', 100),
+        willr_enabled=p.get('willr_enabled', False), willr_length=p.get('willr_length', 14),
+        willr_oversold=p.get('willr_oversold', -80), willr_overbought=p.get('willr_overbought', -20),
+        obv_enabled=p.get('obv_enabled', False), obv_ma_length=p.get('obv_ma_length', 20),
+        donchian_enabled=p.get('donchian_enabled', False), donchian_length=p.get('donchian_length', 20),
+        keltner_enabled=p.get('keltner_enabled', False), keltner_length=p.get('keltner_length', 20),
+        keltner_mult=p.get('keltner_mult', 1.5),
+        psar_enabled=p.get('psar_enabled', False), psar_af_start=p.get('psar_af_start', 0.02),
+        psar_af_step=p.get('psar_af_step', 0.02), psar_af_max=p.get('psar_af_max', 0.2),
+        ichi_enabled=p.get('ichi_enabled', False), ichi_tenkan=p.get('ichi_tenkan', 9),
+        ichi_kijun=p.get('ichi_kijun', 26), ichi_senkou_b=p.get('ichi_senkou_b', 52),
+        hull_enabled=p.get('hull_enabled', False), hull_length=p.get('hull_length', 20),
+        trix_enabled=p.get('trix_enabled', False), trix_length=p.get('trix_length', 15),
+        trix_signal=p.get('trix_signal', 9),
     )
 
 
@@ -145,6 +181,11 @@ def get_active_filters_display(params: Dict[str, Any]):
         'pamrp_enabled': 'PAMRP', 'bbwp_enabled': 'BBWP', 'adx_enabled': 'ADX',
         'ma_trend_enabled': 'MA Trend', 'rsi_enabled': 'RSI', 'volume_enabled': 'Volume',
         'supertrend_enabled': 'Supertrend', 'vwap_enabled': 'VWAP', 'macd_enabled': 'MACD',
+        'bb_enabled': 'Bollinger Bands', 'stoch_entry_enabled': 'Stochastic',
+        'cci_enabled': 'CCI', 'willr_enabled': 'Williams %R', 'obv_enabled': 'OBV',
+        'donchian_enabled': 'Donchian', 'keltner_enabled': 'Keltner',
+        'psar_enabled': 'Parabolic SAR', 'ichi_enabled': 'Ichimoku',
+        'hull_enabled': 'Hull MA', 'trix_enabled': 'TRIX',
     }
     exits = {
         'stop_loss_enabled': 'Stop Loss', 'take_profit_enabled': 'Take Profit',
