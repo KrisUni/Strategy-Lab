@@ -34,7 +34,10 @@ from __future__ import annotations
 
 import math
 from datetime import date
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+import pandas as pd
 
 import numpy as np
 from fastmcp import FastMCP
@@ -158,6 +161,75 @@ def load_data(
         "close_latest": _sf(close.iloc[-1]),
         "close_range": [_sf(close.min()), _sf(close.max())],
         "ann_volatility_pct": _sf(returns.std() * np.sqrt(252) * 100),
+        "total_return_pct": _sf((close.iloc[-1] / close.iloc[0] - 1) * 100),
+    }
+
+
+@mcp.tool()
+def load_data_from_file(
+    file_path: str,
+    symbol: str = "CUSTOM",
+    interval: str = "1h",
+) -> Dict[str, Any]:
+    """
+    Load OHLCV data from a local CSV file into server state.
+
+    The CSV must have columns: datetime/date/time (index), open, high, low, close.
+    Volume column is optional. Column names are case-insensitive.
+
+    Parameters
+    ----------
+    file_path : Absolute or relative path to the CSV file.
+    symbol    : Label to tag this dataset (e.g. "JOE-USD").
+    interval  : Bar size label, e.g. "1h".
+    """
+    path = Path(file_path)
+    if not path.is_absolute():
+        path = Path(__file__).parent.parent / file_path
+
+    df = pd.read_csv(path)
+    df.columns = [c.lower().strip() for c in df.columns]
+
+    # Find the datetime column
+    time_col = next(
+        (c for c in df.columns if c in ("datetime", "date", "time", "timestamp", "index")),
+        df.columns[0],
+    )
+    df[time_col] = pd.to_datetime(df[time_col])
+    df = df.set_index(time_col).sort_index()
+
+    # Normalise required columns
+    rename = {}
+    for col in df.columns:
+        for std in ("open", "high", "low", "close", "volume"):
+            if col == std or col.endswith(f"_{std}") or col.startswith(f"{std}_"):
+                rename[col] = std
+    df = df.rename(columns=rename)
+
+    required = {"open", "high", "low", "close"}
+    missing = required - set(df.columns)
+    if missing:
+        return {"status": "error", "message": f"Missing columns: {missing}"}
+
+    if "volume" not in df.columns:
+        df["volume"] = 0.0
+
+    df = df[["open", "high", "low", "close", "volume"]].dropna()
+    _state.update({"df": df, "symbol": symbol, "interval": interval})
+
+    close = df["close"]
+    returns = close.pct_change().dropna()
+
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        "interval": interval,
+        "bars": len(df),
+        "start": str(df.index[0]),
+        "end": str(df.index[-1]),
+        "close_latest": _sf(close.iloc[-1]),
+        "close_range": [_sf(close.min()), _sf(close.max())],
+        "ann_volatility_pct": _sf(returns.std() * np.sqrt(252 * 24) * 100),
         "total_return_pct": _sf((close.iloc[-1] / close.iloc[0] - 1) * 100),
     }
 
