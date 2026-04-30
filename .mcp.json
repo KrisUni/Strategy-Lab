@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "strategy-lab": {
+      "type": "stdio",
+      "command": "/run/media/nachzehrer/LENOVO/Ολα τα αρχεια/Coding/Strategy application/trading_toolkit_v6/trading_toolkit/venv/bin/python",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": "/run/media/nachzehrer/LENOVO/Ολα τα αρχεια/Coding/Strategy application/trading_toolkit_v6/trading_toolkit"
+    }
+  }
+}
