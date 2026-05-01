@@ -499,18 +499,18 @@ class BayesianOptimizer:
         short_or_both = self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH]
 
         pe   = ef.get('pamrp_enabled', False)
-        peln = p_int('pamrp_entry_length', 10, 30) if pe else 21
+        peln = p_int('pamrp_entry_length', 10, 200) if pe else 21
         pel  = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
-        pes  = p_int('pamrp_entry_short', 60, 90) if pe and short_or_both else 80
+        pes  = p_int('pamrp_entry_short', 60, 95) if pe and short_or_both else 80
 
         pxe  = ef.get('pamrp_exit_enabled', False)
-        pxln = p_int('pamrp_exit_length', 10, 30) if pxe else 21
+        pxln = p_int('pamrp_exit_length', 10, 200) if pxe else 21
         pxl  = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
         pxs  = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
 
         be   = ef.get('bbwp_enabled', True)
         bl   = p_int('bbwp_length',         8,   21) if be else 13
-        blb  = p_int('bbwp_lookback',      100,  300) if be else 252
+        blb  = p_int('bbwp_lookback',      50,  1000) if be else 252
         bsma = p_int('bbwp_sma_length',     3,   10) if be else 5
         bmf  = p_cat('bbwp_ma_filter', ['disabled', 'decreasing']) if be else 'disabled'
         btl  = p_int('bbwp_threshold_long',  30,  70) if be and long_or_both  else 50
@@ -519,11 +519,11 @@ class BayesianOptimizer:
         ae  = ef.get('adx_enabled', False)
         al  = p_int('adx_length',    10, 20) if ae else 14
         asm = p_int('adx_smoothing', 10, 20) if ae else 14
-        at  = p_int('adx_threshold', 15, 35) if ae else 20
+        at  = p_int('adx_threshold', 15, 60) if ae else 20
 
         mae = ef.get('ma_trend_enabled', False)
-        maf = p_int('ma_fast_length',  20, 100) if mae else 50
-        mas = p_int('ma_slow_length', 100, 300) if mae else 200
+        maf = p_int('ma_fast_length',  20, 500) if mae else 50
+        mas = p_int('ma_slow_length', 100, 1000) if mae else 200
         mat = p_cat('ma_type', ['sma', 'ema'])  if mae else 'sma'
 
         re  = ef.get('rsi_enabled', False)
@@ -536,8 +536,8 @@ class BayesianOptimizer:
         vm  = p_float('volume_multiplier', 0.8, 1.5) if ve else 1.0
 
         ste = ef.get('supertrend_enabled', False)
-        stp = p_int('supertrend_period',         7,   14) if ste else 10
-        stm = p_float('supertrend_multiplier', 2.0,  4.0) if ste else 3.0
+        stp = p_int('supertrend_period',         7,  100) if ste else 10
+        stm = p_float('supertrend_multiplier', 1.5, 10.0) if ste else 3.0
 
         vwe = ef.get('vwap_enabled', False)
 
@@ -547,15 +547,15 @@ class BayesianOptimizer:
         mcsi = p_int('macd_signal',  6,  12) if mce else 9
 
         sle = ef.get('stop_loss_enabled', True)
-        sll = p_float('stop_loss_pct_long',  1.0, 10.0) if sle else 3.0
-        sls = p_float('stop_loss_pct_short', 1.0, 10.0) if sle else 3.0
+        sll = p_float('stop_loss_pct_long',  0.5, 30.0) if sle else 3.0
+        sls = p_float('stop_loss_pct_short', 0.5, 30.0) if sle else 3.0
 
         tpe = ef.get('take_profit_enabled', False)
-        tpl = p_float('take_profit_pct_long',  2.0, 15.0) if tpe else 5.0
-        tps = p_float('take_profit_pct_short', 2.0, 15.0) if tpe else 5.0
+        tpl = p_float('take_profit_pct_long',  1.0, 50.0) if tpe else 5.0
+        tps = p_float('take_profit_pct_short', 1.0, 50.0) if tpe else 5.0
 
         tse = ef.get('trailing_stop_enabled', False)
-        tsp = p_float('trailing_stop_pct', 1.0, 5.0) if tse else 2.0
+        tsp = p_float('trailing_stop_pct', 0.5, 20.0) if tse else 2.0
 
         ate = ef.get('atr_trailing_enabled', False)
         atl = p_int('atr_length',         10,  20) if ate else 14
@@ -564,7 +564,7 @@ class BayesianOptimizer:
         sre = ef.get('stoch_rsi_exit_enabled', False)
 
         txe = ef.get('time_exit_enabled', False)
-        txb = p_int('time_exit_bars', 10, 50) if txe else 20
+        txb = p_int('time_exit_bars', 5, 500) if txe else 20
 
         mxe = ef.get('ma_exit_enabled', False)
         mxf = p_int('ma_exit_fast',  5, 15) if mxe else 10

@@ -35,7 +35,7 @@ from __future__ import annotations
 import math
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -89,19 +89,91 @@ def _sf(v: Any) -> Any:
 def _results_to_dict(r) -> Dict[str, Any]:
     """Serialize a BacktestResults dataclass to a plain dict."""
     return {
-        "num_trades":         r.num_trades,
-        "total_return_pct":   _sf(r.total_return_pct),
-        "cagr":               _sf(r.cagr),
-        "sharpe_ratio":       _sf(r.sharpe_ratio),
-        "sortino_ratio":      _sf(r.sortino_ratio),
-        "calmar_ratio":       _sf(r.calmar_ratio),
-        "max_drawdown_pct":   _sf(r.max_drawdown_pct),
-        "win_rate":           _sf(r.win_rate),
-        "profit_factor":      _sf(r.profit_factor),
-        "expectancy":         _sf(r.expectancy),
-        "payoff_ratio":       _sf(r.payoff_ratio),
-        "pct_time_in_market": _sf(r.pct_time_in_market),
+        "num_trades":             r.num_trades,
+        "total_return_pct":       _sf(r.total_return_pct),
+        "cagr":                   _sf(r.cagr),
+        "sharpe_ratio":           _sf(r.sharpe_ratio),
+        "sortino_ratio":          _sf(r.sortino_ratio),
+        "calmar_ratio":           _sf(r.calmar_ratio),
+        "max_drawdown_pct":       _sf(r.max_drawdown_pct),
+        "win_rate":               _sf(r.win_rate),
+        "profit_factor":          _sf(r.profit_factor),
+        "expectancy":             _sf(r.expectancy),
+        "payoff_ratio":           _sf(r.payoff_ratio),
+        "pct_time_in_market":     _sf(r.pct_time_in_market),
+        "avg_winner_pct":         _sf(r.avg_winner_pct),
+        "avg_loser_pct":          _sf(r.avg_loser_pct),
+        "avg_bars_held":          _sf(r.avg_bars_held),
+        "max_consecutive_losses": r.max_consecutive_losses,
+        "max_consecutive_wins":   r.max_consecutive_wins,
+        "longest_drawdown_bars":  r.longest_drawdown_bars,
     }
+
+
+def _trade_to_dict(t) -> Dict[str, Any]:
+    """Serialize a Trade object to a plain dict."""
+    return {
+        "entry_date":  str(t.entry_date),
+        "exit_date":   str(t.exit_date) if t.exit_date else None,
+        "direction":   t.direction,
+        "entry_price": _sf(t.entry_price),
+        "exit_price":  _sf(t.exit_price) if t.exit_price else None,
+        "pnl_pct":     _sf(t.pnl_pct),
+        "pnl":         _sf(t.pnl),
+        "bars_held":   t.bars_held,
+        "exit_reason": t.exit_reason,
+        "mae":         _sf(t.mae),
+        "mfe":         _sf(t.mfe),
+    }
+
+
+def _direction_split(trades) -> Dict[str, Any]:
+    """Break trade results down by long vs short direction."""
+    def _stats(subset):
+        if not subset:
+            return {"num_trades": 0, "win_rate": 0.0, "profit_factor": 0.0, "avg_pnl_pct": 0.0}
+        winners = [t for t in subset if t.pnl > 0]
+        losers  = [t for t in subset if t.pnl <= 0]
+        gp = sum(t.pnl for t in winners)
+        gl = abs(sum(t.pnl for t in losers))
+        return {
+            "num_trades":    len(subset),
+            "win_rate":      _sf(len(winners) / len(subset) * 100),
+            "profit_factor": _sf(gp / gl if gl > 0 else (999.99 if gp > 0 else 0.0)),
+            "avg_pnl_pct":   _sf(sum(t.pnl_pct for t in subset) / len(subset)),
+        }
+    longs  = [t for t in trades if t.direction == "long"]
+    shorts = [t for t in trades if t.direction == "short"]
+    return {"long": _stats(longs), "short": _stats(shorts)}
+
+
+def _period_stats(trades, freq: str = "M") -> list:
+    """Monthly (freq='M') or quarterly (freq='Q') performance breakdown."""
+    import pandas as pd
+    if not trades:
+        return []
+    records = [
+        {"period": t.exit_date, "pnl": t.pnl, "pnl_pct": t.pnl_pct, "win": t.pnl > 0}
+        for t in trades if t.exit_date
+    ]
+    if not records:
+        return []
+    df = pd.DataFrame(records)
+    df["period"] = pd.to_datetime(df["period"]).dt.to_period(freq)
+    out = []
+    for period, grp in df.groupby("period"):
+        winners = grp[grp["win"]]
+        losers  = grp[~grp["win"]]
+        gp = float(winners["pnl"].sum())
+        gl = float(abs(losers["pnl"].sum()))
+        out.append({
+            "period":        str(period),
+            "num_trades":    int(len(grp)),
+            "win_rate":      _sf(len(winners) / len(grp) * 100),
+            "profit_factor": _sf(gp / gl if gl > 0 else (999.99 if gp > 0 else 0.0)),
+            "total_pnl_pct": _sf(float(grp["pnl_pct"].sum())),
+        })
+    return out
 
 
 def _require_data() -> Optional[Dict]:
@@ -272,7 +344,10 @@ def set_params(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def run_backtest() -> Dict[str, Any]:
+def run_backtest(
+    include_trades: bool = False,
+    include_periods: bool = False,
+) -> Dict[str, Any]:
     """
     Run a backtest with the current data and params.
 
@@ -282,6 +357,10 @@ def run_backtest() -> Dict[str, Any]:
     Returns a full metrics dict: return, CAGR, Sharpe, Sortino, Calmar,
     max drawdown, win rate, profit factor, expectancy, payoff ratio,
     and % time in market.
+
+    Optional flags:
+    - include_trades=True  → add per-trade log and long/short direction split
+    - include_periods=True → add monthly P&L breakdown
     """
     if (err := _require_data()):
         return err
@@ -296,7 +375,13 @@ def run_backtest() -> Dict[str, Any]:
         results = engine.run(_state["df"].copy())
         metrics = _results_to_dict(results)
         _state["last_metrics"] = metrics
-        return {"status": "ok", "metrics": metrics}
+        out: Dict[str, Any] = {"status": "ok", "metrics": metrics}
+        if include_trades:
+            out["trades"] = [_trade_to_dict(t) for t in results.trades]
+            out["direction_split"] = _direction_split(results.trades)
+        if include_periods:
+            out["monthly"] = _period_stats(results.trades, "M")
+        return out
     except Exception as exc:
         return {"error": str(exc)}
 
@@ -367,6 +452,18 @@ def run_optimize(
         if result.best_params:
             _state["params"].update(result.best_params)
 
+        fold_results = [
+            {
+                "fold":         f.fold_num,
+                "train_period": f"{f.train_start.date()} → {f.train_end.date()}",
+                "test_period":  f"{f.test_start.date()} → {f.test_end.date()}",
+                "train_value":  _sf(f.train_value),
+                "test_value":   _sf(f.test_value),
+                "train_trades": f.train_trades,
+                "test_trades":  f.test_trades,
+            }
+            for f in (result.walkforward_folds or [])
+        ]
         return {
             "status": "ok",
             "metric": metric,
@@ -376,6 +473,7 @@ def run_optimize(
             "efficiency_ratio": _sf(result.efficiency_ratio),
             "failed_trial_pct": _sf(result.failed_trial_pct),
             "warnings": result.warnings or [],
+            "fold_results": fold_results,
             "full_data_metrics": _results_to_dict(result.full_data_results),
             "best_params": result.best_params,
             "note": (
@@ -552,6 +650,155 @@ def get_market_characterization() -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def run_cost_sweep(
+    round_trip_pcts: List[float] = [0.3, 0.5, 1.0, 2.0, 3.0],
+) -> Dict[str, Any]:
+    """
+    Run the current strategy at multiple round-trip cost levels.
+
+    Reveals the breakeven cost point and how much margin the edge has.
+    Each round-trip cost is split evenly: commission = slippage = RT/4 per leg.
+    E.g. 1.0% round-trip → 0.25% commission + 0.25% slippage per leg.
+
+    Use this to answer: 'Is the edge real, or does it only survive at unrealistic costs?'
+    """
+    if (err := _require_data()):
+        return err
+
+    results_out = []
+    for rt in round_trip_pcts:
+        per_leg = rt / 4.0
+        try:
+            engine = BacktestEngine(
+                params_to_strategy(_state["params"]),
+                _state["capital"],
+                per_leg,   # commission
+                per_leg,   # slippage
+            )
+            r = engine.run(_state["df"].copy())
+            results_out.append({
+                "round_trip_pct": rt,
+                **_results_to_dict(r),
+            })
+        except Exception as exc:
+            results_out.append({"round_trip_pct": rt, "error": str(exc)})
+
+    return {"status": "ok", "cost_sweep": results_out}
+
+
+@mcp.tool()
+def run_sensitivity(
+    metric: str = "profit_factor",
+    delta_pct: float = 25.0,
+) -> Dict[str, Any]:
+    """
+    Vary each active indicator param by ±delta_pct from its current value.
+
+    Runs a backtest for each variation and reports how the target metric changes.
+    High sensitivity = fragile (overfit). Low sensitivity = robust plateau.
+
+    Only varies params for enabled indicators (respects *_enabled flags).
+    Results sorted by sensitivity descending — most fragile params first.
+
+    Parameters
+    ----------
+    metric    : metric to track — 'profit_factor', 'sharpe_ratio', 'cagr', etc.
+    delta_pct : percentage change applied to each param (default ±25%)
+    """
+    if (err := _require_data()):
+        return err
+
+    filters = _enabled_filters()
+
+    INDICATOR_PARAMS: Dict[str, List[str]] = {
+        "pamrp_enabled":        ["pamrp_entry_length", "pamrp_entry_long", "pamrp_entry_short",
+                                  "pamrp_exit_length", "pamrp_exit_long", "pamrp_exit_short"],
+        "bbwp_enabled":         ["bbwp_length", "bbwp_lookback", "bbwp_sma_length",
+                                  "bbwp_threshold_long", "bbwp_threshold_short"],
+        "adx_enabled":          ["adx_length", "adx_smoothing", "adx_threshold"],
+        "ma_trend_enabled":     ["ma_fast_length", "ma_slow_length"],
+        "rsi_enabled":          ["rsi_length", "rsi_oversold", "rsi_overbought"],
+        "supertrend_enabled":   ["supertrend_period", "supertrend_multiplier"],
+        "stop_loss_enabled":    ["stop_loss_pct_long", "stop_loss_pct_short"],
+        "take_profit_enabled":  ["take_profit_pct_long", "take_profit_pct_short"],
+        "trailing_stop_enabled": ["trailing_stop_pct", "trailing_stop_activation"],
+        "time_exit_enabled":    ["time_exit_bars_long", "time_exit_bars_short"],
+        "atr_trailing_enabled": ["atr_length", "atr_multiplier"],
+    }
+
+    active_params: List[str] = []
+    for flag, param_names in INDICATOR_PARAMS.items():
+        if filters.get(flag, False):
+            active_params.extend(param_names)
+
+    if not active_params:
+        return {"error": "No indicators enabled — nothing to vary."}
+
+    # Baseline
+    try:
+        base_engine = BacktestEngine(
+            params_to_strategy(_state["params"]),
+            _state["capital"],
+            _state["commission"],
+            _state["slippage"],
+        )
+        base_r = base_engine.run(_state["df"].copy())
+        base_val = getattr(base_r, metric, None)
+        if base_val is None:
+            return {"error": f"Unknown metric '{metric}'. Use profit_factor, sharpe_ratio, cagr, etc."}
+    except Exception as exc:
+        return {"error": f"Baseline backtest failed: {exc}"}
+
+    rows = []
+    for param in active_params:
+        base_param_val = _state["params"].get(param)
+        if base_param_val is None or base_param_val == 0:
+            continue
+        is_int = isinstance(base_param_val, int)
+        delta = abs(base_param_val) * delta_pct / 100.0
+
+        lo_raw = base_param_val - delta
+        hi_raw = base_param_val + delta
+        lo_val = max(1, int(round(lo_raw))) if is_int else round(lo_raw, 4)
+        hi_val = max((lo_val + 1) if is_int else lo_val + 0.01, int(round(hi_raw)) if is_int else round(hi_raw, 4))
+
+        row: Dict[str, Any] = {
+            "param":    param,
+            "base":     base_param_val,
+            "low_val":  lo_val,
+            "high_val": hi_val,
+        }
+        for label, test_val in [("low", lo_val), ("high", hi_val)]:
+            test_params = dict(_state["params"])
+            test_params[param] = test_val
+            try:
+                eng = BacktestEngine(
+                    params_to_strategy(test_params),
+                    _state["capital"],
+                    _state["commission"],
+                    _state["slippage"],
+                )
+                r = eng.run(_state["df"].copy())
+                row[f"{label}_{metric}"] = _sf(getattr(r, metric))
+            except Exception:
+                row[f"{label}_{metric}"] = None
+
+        lo_m = row.get(f"low_{metric}")
+        hi_m = row.get(f"high_{metric}")
+        row["sensitivity"] = _sf(abs(hi_m - lo_m)) if (lo_m is not None and hi_m is not None) else None
+        rows.append(row)
+
+    rows.sort(key=lambda r: r.get("sensitivity") or 0.0, reverse=True)
+    return {
+        "status":    "ok",
+        "metric":    metric,
+        "baseline":  _sf(base_val),
+        "delta_pct": delta_pct,
+        "params":    rows,
+    }
+
 
 if __name__ == "__main__":
     mcp.run()  # defaults to stdio transport — required for Claude Desktop
