@@ -555,7 +555,7 @@ class BayesianOptimizer:
         tps = p_float('take_profit_pct_short', 1.0, 50.0) if tpe else 5.0
 
         tse = ef.get('trailing_stop_enabled', False)
-        tsp = p_float('trailing_stop_pct', 0.5, 20.0) if tse else 2.0
+        tsp = p_float('trailing_stop_pct', 1.0, 5.0) if tse else 2.0
 
         ate = ef.get('atr_trailing_enabled', False)
         atl = p_int('atr_length',         10,  20) if ate else 14
@@ -564,7 +564,7 @@ class BayesianOptimizer:
         sre = ef.get('stoch_rsi_exit_enabled', False)
 
         txe = ef.get('time_exit_enabled', False)
-        txb = p_int('time_exit_bars', 5, 500) if txe else 20
+        txb = p_int('time_exit_bars', 10, 50) if txe else 20
 
         mxe = ef.get('ma_exit_enabled', False)
         mxf = p_int('ma_exit_fast',  5, 15) if mxe else 10
