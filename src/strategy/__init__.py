@@ -64,10 +64,14 @@ class StrategyParams:
 
     # PAMRP
     pamrp_enabled: bool = True
-    pamrp_entry_length: int = 21
+    pamrp_entry_ma_length: int = 20
+    pamrp_entry_lookback: int = 350
+    pamrp_entry_ma_type: str = 'sma'
     pamrp_entry_long: int = 20
     pamrp_entry_short: int = 80
-    pamrp_exit_length: int = 21
+    pamrp_exit_ma_length: int = 20
+    pamrp_exit_lookback: int = 350
+    pamrp_exit_ma_type: str = 'sma'
     pamrp_exit_long: int = 70
     pamrp_exit_short: int = 30
 
@@ -181,10 +185,18 @@ class StrategyParams:
             d['exit_operator'] = ConditionOperator(d['exit_operator'].lower())
         if 'entry_conflict_mode' in d and isinstance(d['entry_conflict_mode'], str):
             d['entry_conflict_mode'] = EntryConflictMode(d['entry_conflict_mode'].lower())
+        # Layer 1: pamrp_length → entry/exit split (oldest sessions)
         legacy_pamrp_length = d.pop('pamrp_length', None)
         if legacy_pamrp_length is not None:
             d.setdefault('pamrp_entry_length', legacy_pamrp_length)
             d.setdefault('pamrp_exit_length', legacy_pamrp_length)
+        # Layer 2: pamrp_entry_length / pamrp_exit_length → ma_length (pre-FIX-11 sessions)
+        legacy_entry_length = d.pop('pamrp_entry_length', None)
+        if legacy_entry_length is not None:
+            d.setdefault('pamrp_entry_ma_length', legacy_entry_length)
+        legacy_exit_length = d.pop('pamrp_exit_length', None)
+        if legacy_exit_length is not None:
+            d.setdefault('pamrp_exit_ma_length', legacy_exit_length)
         valid_fields = set(cls.__dataclass_fields__.keys())
         return cls(**{k: v for k, v in d.items() if k in valid_fields})
 
@@ -220,17 +232,30 @@ class SignalGenerator:
         df = df.copy()
         p  = self.params
 
-        # PAMRP entry/exit can use different lookbacks.
+        # PAMRP entry/exit can use independent MA window, lookback, and MA type.
+        vol = df['volume'] if 'volume' in df.columns else None
         if p.pamrp_enabled:
-            df['pamrp_entry'] = pamrp(df['high'], df['low'], df['close'], p.pamrp_entry_length)
+            df['pamrp_entry'] = pamrp(
+                df['close'], p.pamrp_entry_ma_length, p.pamrp_entry_lookback,
+                p.pamrp_entry_ma_type, vol,
+            )
         else:
             df['pamrp_entry'] = 50.0
 
         if p.pamrp_exit_enabled:
-            if p.pamrp_enabled and p.pamrp_entry_length == p.pamrp_exit_length:
+            entry_reusable = (
+                p.pamrp_enabled
+                and p.pamrp_exit_ma_length == p.pamrp_entry_ma_length
+                and p.pamrp_exit_lookback  == p.pamrp_entry_lookback
+                and p.pamrp_exit_ma_type   == p.pamrp_entry_ma_type
+            )
+            if entry_reusable:
                 df['pamrp_exit'] = df['pamrp_entry']
             else:
-                df['pamrp_exit'] = pamrp(df['high'], df['low'], df['close'], p.pamrp_exit_length)
+                df['pamrp_exit'] = pamrp(
+                    df['close'], p.pamrp_exit_ma_length, p.pamrp_exit_lookback,
+                    p.pamrp_exit_ma_type, vol,
+                )
         else:
             df['pamrp_exit'] = 50.0
 

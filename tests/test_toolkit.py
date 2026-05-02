@@ -27,10 +27,18 @@ class TestIndicators:
     
     def test_pamrp_range(self, sample_df):
         """PAMRP should be between 0 and 100"""
-        result = pamrp(sample_df['high'], sample_df['low'], sample_df['close'], 21)
+        result = pamrp(sample_df['close'], ma_length=10, lookback=30)
         valid = result.dropna()
         assert valid.min() >= 0
         assert valid.max() <= 100
+
+    def test_pamrp_matches_pmar_percentile_rank(self, sample_df):
+        """pamrp(close, n, lb) must equal percentile_rank(close / sma(close, n), lb)"""
+        from src.indicators import sma, percentile_rank
+        n, lb = 10, 30
+        expected = percentile_rank(sample_df['close'] / sma(sample_df['close'], n), lb)
+        result   = pamrp(sample_df['close'], ma_length=n, lookback=lb)
+        pd.testing.assert_series_equal(result, expected, check_names=False)
     
     def test_bbwp_range(self, sample_df):
         """BBWP should be between 0 and 100"""
@@ -133,25 +141,29 @@ class TestStrategy:
         """Params should convert to dict"""
         d = default_params.to_dict()
         assert isinstance(d, dict)
-        assert 'pamrp_entry_length' in d
-        assert 'pamrp_exit_length' in d
+        assert 'pamrp_entry_ma_length' in d
+        assert 'pamrp_entry_lookback' in d
+        assert 'pamrp_exit_ma_length' in d
+        assert 'pamrp_exit_lookback' in d
         assert 'stop_loss_enabled' in d
 
     def test_params_from_dict(self):
-        """Params should be creatable from dict"""
+        """Params should be creatable from dict; legacy pamrp_length migrates through both layers."""
         d = {'pamrp_length': 30, 'stop_loss_pct_long': 5.0}
         params = StrategyParams.from_dict(d)
-        assert params.pamrp_entry_length == 30
-        assert params.pamrp_exit_length == 30
+        assert params.pamrp_entry_ma_length == 30
+        assert params.pamrp_exit_ma_length == 30
         assert params.stop_loss_pct_long == 5.0
 
-    def test_pamrp_entry_and_exit_lengths_are_independent(self, sample_df):
-        """Entry and exit PAMRP should be calculated from separate lookbacks."""
+    def test_pamrp_entry_and_exit_params_are_independent(self, sample_df):
+        """Entry and exit PAMRP should produce different series when params differ."""
         params = StrategyParams(
             pamrp_enabled=True,
-            pamrp_entry_length=10,
+            pamrp_entry_ma_length=10,
+            pamrp_entry_lookback=30,
             pamrp_exit_enabled=True,
-            pamrp_exit_length=30,
+            pamrp_exit_ma_length=20,
+            pamrp_exit_lookback=60,
         )
         gen = SignalGenerator(params)
         result = gen.calculate_indicators(sample_df)

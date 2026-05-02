@@ -49,7 +49,7 @@ def _suppress_warnings():
 
 # Entry-signal params — instability HERE means no reliable edge
 _ENTRY_PARAM_PREFIXES = (
-    'pamrp_entry_length', 'pamrp_entry',
+    'pamrp_entry_ma_length', 'pamrp_entry_lookback', 'pamrp_entry_ma_type', 'pamrp_entry',
     'bbwp_length', 'bbwp_lookback', 'bbwp_sma', 'bbwp_threshold', 'bbwp_ma',
     'adx_length', 'adx_smoothing', 'adx_threshold',
     'ma_fast_length', 'ma_slow_length', 'ma_type',
@@ -61,11 +61,11 @@ _ENTRY_PARAM_PREFIXES = (
 
 # Exit/risk params — adapting between regimes is EXPECTED, not a red flag
 _EXIT_PARAM_PREFIXES = (
-    'pamrp_exit_length',
+    'pamrp_exit_ma_length', 'pamrp_exit_lookback', 'pamrp_exit_ma_type',
     'stop_loss_pct', 'take_profit_pct', 'trailing_stop_pct',
     'atr_length', 'atr_multiplier',
     'time_exit_bars', 'ma_exit_fast', 'ma_exit_slow',
-    'bbwp_exit_threshold','pamrp_exit',
+    'bbwp_exit_threshold', 'pamrp_exit',
 )
 
 
@@ -498,15 +498,19 @@ class BayesianOptimizer:
         long_or_both  = self.trade_direction in [TradeDirection.LONG_ONLY,  TradeDirection.BOTH]
         short_or_both = self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH]
 
-        pe   = ef.get('pamrp_enabled', False)
-        peln = p_int('pamrp_entry_length', 10, 200) if pe else 21
-        pel  = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
-        pes  = p_int('pamrp_entry_short', 60, 95) if pe and short_or_both else 80
+        pe    = ef.get('pamrp_enabled', False)
+        pe_ml = p_int('pamrp_entry_ma_length', 10, 50) if pe else 20
+        pe_lb = p_int('pamrp_entry_lookback', 100, 500) if pe else 350
+        pe_mt = p_cat('pamrp_entry_ma_type', ['sma', 'ema', 'wma', 'rma']) if pe else 'sma'
+        pel   = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
+        pes   = p_int('pamrp_entry_short', 60, 95) if pe and short_or_both else 80
 
-        pxe  = ef.get('pamrp_exit_enabled', False)
-        pxln = p_int('pamrp_exit_length', 10, 200) if pxe else 21
-        pxl  = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
-        pxs  = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
+        pxe   = ef.get('pamrp_exit_enabled', False)
+        px_ml = p_int('pamrp_exit_ma_length', 10, 50) if pxe else 20
+        px_lb = p_int('pamrp_exit_lookback', 100, 500) if pxe else 350
+        px_mt = p_cat('pamrp_exit_ma_type', ['sma', 'ema', 'wma', 'rma']) if pxe else 'sma'
+        pxl   = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
+        pxs   = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
 
         be   = ef.get('bbwp_enabled', True)
         bl   = p_int('bbwp_length',         8,   21) if be else 13
@@ -585,9 +589,10 @@ class BayesianOptimizer:
             allow_same_bar_reversal=p_bool('allow_same_bar_reversal', False),
             entry_conflict_mode=p_entry_conflict_mode('entry_conflict_mode', EntryConflictMode.SKIP),
             pamrp_enabled=pe,
-            pamrp_entry_length=peln,
-            pamrp_entry_long=pel, pamrp_entry_short=pes, pamrp_exit_long=pxl, pamrp_exit_short=pxs,
-            pamrp_exit_length=pxln,
+            pamrp_entry_ma_length=pe_ml, pamrp_entry_lookback=pe_lb, pamrp_entry_ma_type=pe_mt,
+            pamrp_entry_long=pel, pamrp_entry_short=pes,
+            pamrp_exit_ma_length=px_ml, pamrp_exit_lookback=px_lb, pamrp_exit_ma_type=px_mt,
+            pamrp_exit_long=pxl, pamrp_exit_short=pxs,
             bbwp_enabled=be, bbwp_length=bl, bbwp_lookback=blb, bbwp_sma_length=bsma,
             bbwp_threshold_long=btl, bbwp_threshold_short=bts, bbwp_ma_filter=bmf,
             adx_enabled=ae, adx_length=al, adx_smoothing=asm, adx_threshold=at,
