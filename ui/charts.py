@@ -358,17 +358,19 @@ def create_price_chart_with_trades(
             rn = dict(row=row, col=1)
 
             if panel_name == 'pamrp':
-                entry_length = p.get('pamrp_entry_length', 21)
-                exit_length = p.get('pamrp_exit_length', 21)
                 show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
                 show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
-                same_length = entry_length == exit_length
+                same_config = (
+                    p.get('pamrp_entry_ma_length', 20) == p.get('pamrp_exit_ma_length', 20)
+                    and p.get('pamrp_entry_lookback', 350) == p.get('pamrp_exit_lookback', 350)
+                    and p.get('pamrp_entry_ma_type', 'sma') == p.get('pamrp_exit_ma_type', 'sma')
+                )
 
                 if show_entry:
                     fig.add_trace(go.Scatter(
                         x=idf.index, y=idf['pamrp_entry'], mode='lines',
                         line=dict(color='#60a5fa', width=1.2),
-                        name='PAMRP Entry' if show_exit and not same_length else 'PAMRP',
+                        name='PAMRP Entry' if show_exit and not same_config else 'PAMRP',
                         showlegend=True,
                     ), **rn)
                 elif 'pamrp' in idf.columns:
@@ -378,7 +380,7 @@ def create_price_chart_with_trades(
                         name='PAMRP', showlegend=True,
                     ), **rn)
 
-                if show_exit and (not show_entry or not same_length):
+                if show_exit and (not show_entry or not same_config):
                     fig.add_trace(go.Scatter(
                         x=idf.index, y=idf['pamrp_exit'], mode='lines',
                         line=dict(color='#f59e0b', width=1.2, dash='dot'),

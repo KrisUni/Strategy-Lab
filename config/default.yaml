@@ -20,11 +20,16 @@ backtest:
 # CORE INDICATORS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# PAMRP Settings
+# PAMRP Settings (PMARP — Price Moving Average Ratio Percentile)
 pamrp:
-  length: 21
+  entry_ma_length: 20
+  entry_lookback: 350
+  entry_ma_type: "sma"
   entry_long: 20      # Oversold threshold
   entry_short: 80     # Overbought threshold
+  exit_ma_length: 20
+  exit_lookback: 350
+  exit_ma_type: "sma"
   exit_long: 70       # Exit long when overbought
   exit_short: 30      # Exit short when oversold
 

@@ -713,8 +713,10 @@ def run_sensitivity(
     filters = _enabled_filters()
 
     INDICATOR_PARAMS: Dict[str, List[str]] = {
-        "pamrp_enabled":        ["pamrp_entry_length", "pamrp_entry_long", "pamrp_entry_short",
-                                  "pamrp_exit_length", "pamrp_exit_long", "pamrp_exit_short"],
+        "pamrp_enabled":        ["pamrp_entry_ma_length", "pamrp_entry_lookback", "pamrp_entry_ma_type",
+                                  "pamrp_entry_long", "pamrp_entry_short",
+                                  "pamrp_exit_ma_length", "pamrp_exit_lookback", "pamrp_exit_ma_type",
+                                  "pamrp_exit_long", "pamrp_exit_short"],
         "bbwp_enabled":         ["bbwp_length", "bbwp_lookback", "bbwp_sma_length",
                                   "bbwp_threshold_long", "bbwp_threshold_short"],
         "adx_enabled":          ["adx_length", "adx_smoothing", "adx_threshold"],
