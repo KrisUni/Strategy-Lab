@@ -24,6 +24,10 @@ Fix log (relative to original):
     [FIX-9]  pamrp          : Added docstring. Function was undocumented, violating project style.
     [FIX-10] all multi-series: Added index alignment assertions on all functions that combine
                               two or more input Series.
+    [FIX-11] pamrp          : Replaced Stochastic %K implementation with correct PMARP formula.
+                              PMAR = close / MA(close, ma_length); PMARP = percentile_rank(PMAR, lookback).
+                              Old implementation computed (close - lowest_low) / range, which is Stochastic %K.
+                              Added vwma() helper. Signature change: drop high/low, add ma_length/lookback/ma_type/volume.
     [NEW-1]  rsi_hidden_divergence : Hidden bullish/bearish RSI divergence for trend continuation.
     [NEW-2]  hpdr_bands     : High Probability Distribution Range bands using rolling
                               quantiles, with Normal-equivalent coverage labels.
@@ -94,6 +98,12 @@ def rma(series: pd.Series, length: int) -> pd.Series:
     return series.ewm(alpha=1 / length, adjust=False).mean()
 
 
+def vwma(close: pd.Series, volume: pd.Series, length: int) -> pd.Series:
+    """Volume Weighted Moving Average."""
+    _assert_aligned(close, volume)
+    return (close * volume).rolling(window=length).sum() / volume.rolling(window=length).sum()
+
+
 def ma(series: pd.Series, length: int, ma_type: str = 'sma') -> pd.Series:
     """
     Moving average dispatcher.
@@ -120,30 +130,49 @@ def ma(series: pd.Series, length: int, ma_type: str = 'sma') -> pd.Series:
 # VOLATILITY / RANGE INDICATORS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def pamrp(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+def pamrp(
+    close: pd.Series,
+    ma_length: int,
+    lookback: int,
+    ma_type: str = 'sma',
+    volume: pd.Series | None = None,
+) -> pd.Series:
     """
-    Price Action Mean Reversion Percentile (PAMRP).
+    Price Moving Average Ratio Percentile (PMARP).
 
-    Measures where the current close sits within the high-low range of the
-    past `length` bars, expressed as a percentage (0–100).
+    Based on PMAR & PMARP by The_Caretaker (TradingView, MPL-2.0).
 
-        PAMRP = (close - lowest_low) / (highest_high - lowest_low) × 100
+    Step 1 — PMAR: ratio of price to its moving average.
+        PMAR = close / MA(close, ma_length)
 
-    Values near 0 indicate close to the bottom of the range (potential long entry).
-    Values near 100 indicate close to the top (potential short entry or long exit).
+    Step 2 — PMARP: percentile rank of PMAR over a rolling lookback.
+        PMARP = percentile_rank(PMAR, lookback)
+
+    Values near 0   → price historically cheap vs its MA → mean-reversion long.
+    Values near 100 → price historically stretched above MA → mean-reversion short.
 
     Parameters
     ----------
-    high, low, close : OHLC series (must share the same index)
-    length           : lookback window in bars
+    close     : close price series
+    ma_length : MA window for PMAR computation
+    lookback  : rolling window for percentile ranking
+    ma_type   : one of 'sma', 'ema', 'wma', 'rma', 'vwma' (default 'sma')
+    volume    : required when ma_type='vwma'
+
+    Returns
+    -------
+    pd.Series in [0, 100], NaN during warmup (first ma_length + lookback bars)
     """
-    _assert_aligned(high, low, close)  # [FIX-10]
-    highest   = high.rolling(window=length).max()
-    lowest    = low.rolling(window=length).min()
-    range_val = highest - lowest
-    # Avoid division by zero on flat bars; replace 0-range with NaN so
-    # downstream comparisons correctly exclude those bars.
-    return (close - lowest) / range_val.replace(0, np.nan) * 100
+    if ma_type == 'vwma':
+        if volume is None:
+            raise ValueError("volume is required when ma_type='vwma'")
+        _assert_aligned(close, volume)
+        ma_val = vwma(close, volume, ma_length)
+    else:
+        ma_val = ma(close, ma_length, ma_type)
+
+    pmar = close / ma_val.replace(0, np.nan)
+    return percentile_rank(pmar, lookback)
 
 
 def bollinger_width(close: pd.Series, length: int, mult: float = 2.0) -> pd.Series:

@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 venv/
 .serena/
+joe_usd_1d.csv
+.mcp.json
