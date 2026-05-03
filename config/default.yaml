@@ -12,8 +12,8 @@ data:
 # Backtest settings
 backtest:
   initial_capital: 10000
-  commission_percent: 0.1
-  slippage_percent: 0.05
+  commission_percent: 1
+  slippage_percent: 0.5
   trade_direction: "long_only"  # long_only, short_only, both
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -111,7 +111,7 @@ htf:
 
 # Stop Loss
 stop_loss:
-  enabled: true
+  enabled: false
   percent_long: 3.0
   percent_short: 3.0
 

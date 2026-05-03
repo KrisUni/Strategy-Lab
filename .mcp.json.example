@@ -2,9 +2,9 @@
   "mcpServers": {
     "strategy-lab": {
       "type": "stdio",
-      "command": "/run/media....",
+      "command": "",
       "args": ["-m", "src.mcp_server"],
-      "cwd": "/run/media..."
+      "cwd": ""
     }
   }
 }

@@ -802,5 +802,169 @@ def run_sensitivity(
     }
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Research log
+# ─────────────────────────────────────────────────────────────────────────────
+
+_LOG_PATH = Path(__file__).parent.parent / "RESEARCH_LOG.md"
+
+
+@mcp.tool()
+def log_research_result(
+    thesis: str,
+    indicators: str,
+    verdict: str,
+    symbol: str = "",
+    interval: str = "",
+    regime: str = "",
+    efficiency_ratio: Optional[float] = None,
+    p_value: Optional[float] = None,
+    failure_reason: str = "",
+    iteration_history: str = "",
+    notes: str = "",
+) -> Dict[str, Any]:
+    """
+    Append a completed research cycle to RESEARCH_LOG.md.
+
+    Call at the end of each full validation cycle (baseline → optimize →
+    permutation test → verdict). Pulls current metrics from
+    _state["last_metrics"] and date range from the loaded dataframe.
+
+    Parameters
+    ----------
+    thesis           : One sentence — what edge and why it should exist.
+    indicators       : Entry and exit indicators (e.g. "PAMRP + BBWP, ATR exit").
+    verdict          : "VIABLE" | "MARGINAL" | "DISCARD"
+    symbol           : Override symbol (defaults to last loaded symbol).
+    interval         : Override interval (defaults to last loaded interval).
+    regime           : Free-text regime summary from get_market_characterization.
+    efficiency_ratio : OOS efficiency ratio from run_optimize (if run).
+    p_value          : p-value from run_permutation_test (if run).
+    failure_reason   : Why discarded/marginal (e.g. "p=0.38, trade count 12").
+    iteration_history: What was changed and why, one line per step.
+    notes            : Any additional notes.
+    """
+    sym = symbol or _state.get("symbol") or "UNKNOWN"
+    ivl = interval or _state.get("interval") or "unknown"
+    today = date.today().isoformat()
+
+    metrics = _state.get("last_metrics") or {}
+    df = _state.get("df")
+    if df is not None and len(df) > 0:
+        idx = df.index
+        date_start = str(idx[0])[:10]
+        date_end   = str(idx[-1])[:10]
+        n_bars     = len(df)
+    else:
+        date_start = date_end = "unknown"
+        n_bars = 0
+
+    def _fmt(key: str, pct: bool = False) -> str:
+        v = metrics.get(key)
+        if v is None:
+            return "—"
+        return f"{v:.2f}%" if pct else f"{v:.4f}"
+
+    eff_str  = f"{efficiency_ratio:.4f}" if efficiency_ratio is not None else "—"
+    pval_str = f"{p_value:.4f}"          if p_value          is not None else "—"
+
+    entry = (
+        f"\n---\n"
+        f"## {sym} {ivl} — {today} — {verdict}\n\n"
+        f"**Thesis:** {thesis}\n"
+        f"**Indicators:** {indicators}\n"
+        f"**Regime at test time:** {regime or chr(8212)}\n"
+        f"**Date range:** {date_start} → {date_end} ({n_bars} bars)\n\n"
+        f"| Metric           | Value      |\n"
+        f"|------------------|------------|\n"
+        f"| Trades           | {metrics.get('num_trades', chr(8212))} |\n"
+        f"| Total return     | {_fmt('total_return_pct', True)} |\n"
+        f"| CAGR             | {_fmt('cagr', True)} |\n"
+        f"| Sharpe           | {_fmt('sharpe_ratio')} |\n"
+        f"| Max DD           | {_fmt('max_drawdown_pct', True)} |\n"
+        f"| Profit Factor    | {_fmt('profit_factor')} |\n"
+        f"| Win Rate         | {_fmt('win_rate', True)} |\n"
+        f"| Expectancy       | {_fmt('expectancy')} |\n"
+        f"| Efficiency Ratio | {eff_str} |\n"
+        f"| p-value          | {pval_str} |\n\n"
+        f"**Verdict:** {verdict}\n"
+        f"**Failure reason:** {failure_reason or chr(8212)}\n"
+        f"**Iteration history:** {iteration_history or chr(8212)}\n"
+        f"**Notes:** {notes or chr(8212)}\n"
+    )
+
+    try:
+        with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(entry)
+        return {
+            "status": "ok",
+            "logged": f"{sym} {ivl} — {today} — {verdict}",
+            "path":   str(_LOG_PATH),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+def get_research_history(
+    symbol: Optional[str] = None,
+    verdict_filter: Optional[str] = None,
+    last_n: int = 20,
+) -> Dict[str, Any]:
+    """
+    Read and summarise RESEARCH_LOG.md.
+
+    Returns past research entries filtered by symbol and/or verdict.
+    Call at session start before proposing a hypothesis — lets Claude avoid
+    re-testing already-disqualified ideas and surface unexplored regimes.
+
+    Parameters
+    ----------
+    symbol        : Filter by symbol/interval string (case-insensitive, partial).
+    verdict_filter: "VIABLE" | "MARGINAL" | "DISCARD" | None (return all).
+    last_n        : Maximum entries to return, most recent first (default 20).
+    """
+    if not _LOG_PATH.exists():
+        return {"status": "ok", "entries": [], "total": 0,
+                "note": "No research log yet — this symbol has never been tested."}
+
+    try:
+        text = _LOG_PATH.read_text(encoding="utf-8")
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    raw_entries = [e.strip() for e in text.split("\n---\n") if e.strip()]
+
+    entries: List[Dict[str, Any]] = []
+    for raw in raw_entries:
+        lines = raw.splitlines()
+        header = next((l for l in lines if l.startswith("## ")), None)
+        if not header:
+            continue
+        parts = header[3:].split(" — ")
+        if len(parts) < 3:
+            continue
+        sym_ivl        = parts[0].strip()
+        entry_date     = parts[1].strip()
+        entry_verdict  = parts[2].strip()
+
+        if symbol and symbol.upper() not in sym_ivl.upper():
+            continue
+        if verdict_filter and entry_verdict.upper() != verdict_filter.upper():
+            continue
+
+        entries.append({
+            "symbol_interval": sym_ivl,
+            "date":            entry_date,
+            "verdict":         entry_verdict,
+            "raw":             raw,
+        })
+
+    entries.reverse()           # most recent first
+    entries = entries[:last_n]
+
+    return {"status": "ok", "total": len(entries), "entries": entries}
+
 if __name__ == "__main__":
     mcp.run()  # defaults to stdio transport — required for Claude Desktop

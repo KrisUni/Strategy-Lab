@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__strategy-lab__run_backtest",
+      "mcp__codebase-memory-mcp__get_code_snippet",
+      "mcp__plugin_claude-mem_mcp-search__get_observations",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -)",
+      "Bash(venv/bin/python3 -c ' *)",
+      "mcp__strategy-lab__get_research_history",
+      "mcp__strategy-lab__run_cost_sweep",
+      "mcp__strategy-lab__run_optimize"
+    ]
+  }
+}
