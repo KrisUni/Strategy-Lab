@@ -74,7 +74,7 @@ Let the regime drive the hypothesis — not the other way around.
 All sessions use **3% round-trip** unless the user changes it explicitly.
 
 ```python
-set_params({"commission": 0.5, "slippage": 1.0})  # 3% round-trip
+set_params({"commission": 1.0, "slippage": 0.5})  # 3% round-trip
 ```
 
 An edge that only survives at 1% costs is not robust enough to trade.

@@ -31,5 +31,5 @@ tqdm>=4.65.0
 # Statistics
 scipy>=1.11.0
 
-
+# Mcp server
 fastmcp
