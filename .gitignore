@@ -1,0 +1,9 @@
+.agents/
+.claude/
+.codex/
+.pytest_cache/
+__pycache__/
+joe_usd_1d.csv
+.mcp.json
+.serena
+RESEARCH_LOG.md
