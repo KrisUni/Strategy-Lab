@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "strategy-lab": {
+      "type": "stdio",
+      "command": "",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": ""
+    }
+  }
+}
