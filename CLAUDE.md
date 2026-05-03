@@ -27,12 +27,27 @@ in one sentence *why* the edge should exist, don't test it yet.
 ## The Research Loop
 
 ```
-CHARACTERIZE → HYPOTHESIZE → BASELINE → DIAGNOSE → ITERATE → [OPTIMIZE] → VALIDATE
+[HISTORY] → CHARACTERIZE → HYPOTHESIZE → BASELINE → DIAGNOSE → ITERATE → [OPTIMIZE] → VALIDATE
 ```
 
 This is not linear. You will loop back. That is the job.
 
 **Optimize only when the baseline warrants it.** See section 5.
+
+---
+
+## 0. Check Research History First
+
+Before anything else: `get_research_history(symbol)`.
+
+This prevents re-testing disqualified ideas and shows which regimes haven't
+been explored yet. If the log is empty, proceed to step 1.
+
+> JOE/USD: RSI mean-reversion tried, p=0.38, DISCARD.
+> Next hypothesis must differ — different indicator or different regime.
+
+At the end of each full cycle (baseline → optimize → permutation → verdict),
+call `log_research_result(...)` to record the outcome.
 
 ---
 

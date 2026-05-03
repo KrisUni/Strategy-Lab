@@ -7,3 +7,4 @@ venv/
 .serena/
 joe_usd_1d.csv
 .mcp.json
+.gitignore
