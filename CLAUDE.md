@@ -152,25 +152,31 @@ you must justify why an existing indicator can't be adapted via parameters.
 
 **Procedure:**
 
-1. Generate a spec file matching the schema in `src/indicators/specs/`.
-2. Register it via the MCP tool. The registry validator runs automatically —
-   schema check, look-ahead check, determinism check.
-3. The new indicator is `provisional=True` until permutation-tested. It
-   cannot be used in a final recommendation until it passes p < 0.05 on
-   its own (not just as part of a strategy).
-4. Run the same characterize → baseline → diagnose loop on the new indicator
-   that you would on any existing one. The hard limit is still two entry
-   indicators per strategy.
-5. If the indicator survives permutation testing on multiple symbols/regimes,
-   propose promotion from `provisional=True` to permanent. Promotion is a
-   human gate.
+1. `list_indicators` — confirm the signal doesn't already exist under another name.
+2. Write the spec source. No import statements — use `pd`, `np`, `IndicatorSpec`,
+   `ParamSpec`, `register`, and any `src.indicators` compute primitives (`sma`, `ema`,
+   `rsi`, `atr`, etc.) which are pre-loaded in the execution namespace.
+   Compute and signal functions must be named callables, not lambdas.
+3. `register_indicator(spec_source)` — runs syntax check, import whitelist,
+   schema validation, and output column check automatically. Fix any errors
+   it reports before proceeding.
+4. `set_params({"new_key_enabled": True})` + `run_backtest()` — verify the
+   indicator produces trades and the signal is directionally sensible.
+5. Continue the normal characterize → optimize → permutation loop.
+   The two-indicator hard limit still applies.
+6. The indicator is provisional until it passes `run_permutation_test` (p < 0.05).
+   Treat results with extra skepticism until then — a new indicator that
+   immediately produces great metrics is more likely look-ahead or curve-fitting
+   than a genuine discovery.
+7. Promotion from provisional to permanent is a human gate. Do not automate it.
 
 **Failure modes specific to LLM-generated indicators:**
 
 - **Subtle look-ahead.** It is easy to write `df['close'].rolling(N).max()`
   thinking it's a backward window when in some libraries it isn't. The
-  validator catches the obvious cases. Read your own compute function
-  critically before registering.
+  validator does NOT yet catch look-ahead automatically — read your own
+  compute function critically before registering. Any use of `.shift(-N)`,
+  future prices, or non-causal rolling windows is disqualifying.
 - **Curve-fit by construction.** You can write an indicator that "predicts"
   the training set because you tuned its constants while looking at the
   chart. The permutation test catches this. Trust the test, not the chart.

@@ -91,6 +91,7 @@ class IndicatorSpec:
 
 INDICATOR_REGISTRY: List[IndicatorSpec] = []
 _REGISTRY_INDEX: Dict[str, IndicatorSpec] = {}
+_PROVISIONAL_KEYS: set = set()  # keys of in-memory provisional indicators (restart clears)
 
 
 def register(spec: IndicatorSpec) -> None:

@@ -32,6 +32,7 @@ Typical session flow:
 
 from __future__ import annotations
 
+import ast
 import math
 from datetime import date
 from pathlib import Path
@@ -43,8 +44,13 @@ import numpy as np
 from fastmcp import FastMCP
 
 from src.backtest import BacktestEngine, DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
-from src.data import fetch_yfinance
+from src.data import fetch_yfinance, generate_sample_data as _generate_sample_data
 from src.indicators import adx as _adx, atr as _atr, sma as _sma
+import src.indicators as _ind_module
+from src.indicators.registry import (
+    INDICATOR_REGISTRY, IndicatorSpec, ParamSpec,
+    validate_registry as _validate_registry, _PROVISIONAL_KEYS,
+)
 from src.optimize import optimize_strategy
 from src.permutation import run_permutation_test as _run_permutation_test
 from ui.helpers import params_to_strategy
@@ -965,6 +971,168 @@ def get_research_history(
     entries = entries[:last_n]
 
     return {"status": "ok", "total": len(entries), "entries": entries}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Indicator registry tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def list_indicators() -> Dict[str, Any]:
+    """
+    Returns all registered indicators — key, name, group, enabled status in
+    current params, and whether provisional.
+    Call this before creating an indicator to confirm it doesn't already exist.
+    """
+    indicators = []
+    for spec in INDICATOR_REGISTRY:
+        indicators.append({
+            "key":         spec.key,
+            "name":        spec.name,
+            "group":       spec.group,
+            "order":       spec.order,
+            "enabled":     bool(_state["params"].get(spec.enable_param, False)),
+            "provisional": spec.key in _PROVISIONAL_KEYS,
+            "params": [
+                {"name": p.name, "type": p.type, "default": p.default}
+                for p in spec.params
+            ],
+        })
+    return {"indicators": indicators, "count": len(indicators)}
+
+
+@mcp.tool()
+def register_indicator(spec_source: str) -> Dict[str, Any]:
+    """
+    Validates and registers a new indicator at runtime.
+
+    spec_source: complete Python source defining compute/signal functions and
+    calling register(IndicatorSpec(...)). Do NOT include import statements —
+    use pd, np, IndicatorSpec, ParamSpec, register, and any src.indicators
+    compute functions (sma, ema, rsi, atr, etc.) which are pre-loaded.
+
+    Validation (in order):
+    1. Syntax check
+    2. Import whitelist — pandas, numpy, scipy, src.indicators only
+    3. exec in restricted namespace — must call register(IndicatorSpec(...))
+    4. Duplicate key check
+    5. Schema validation via validate_registry()
+    6. Output column check on 100-bar synthetic data
+
+    On success: indicator is provisional, available immediately in set_params/run_backtest.
+    """
+    _ALLOWED_IMPORTS = {
+        "pandas", "numpy", "scipy", "scipy.stats",
+        "src.indicators", "src.indicators.registry",
+    }
+
+    # Step 1: syntax check
+    try:
+        compiled = compile(spec_source, "<mcp_indicator>", "exec")
+        tree = ast.parse(spec_source)
+    except SyntaxError as e:
+        return {"error": "syntax_error", "detail": str(e)}
+
+    # Step 2: import whitelist
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.name
+                if not any(name == a or name.startswith(a + ".") for a in _ALLOWED_IMPORTS):
+                    return {"error": "disallowed_import", "detail": name}
+        elif isinstance(node, ast.ImportFrom):
+            name = node.module or ""
+            if not any(name == a or name.startswith(a + ".") for a in _ALLOWED_IMPORTS):
+                return {"error": "disallowed_import", "detail": name}
+
+    # Step 3: exec in restricted namespace
+    _captured: List[Any] = []
+
+    def _capture_register(s: Any) -> None:
+        _captured.append(s)
+
+    _ind_fns = {
+        n: getattr(_ind_module, n)
+        for n in dir(_ind_module)
+        if not n.startswith("_")
+    }
+
+    namespace: Dict[str, Any] = {
+        "__builtins__": {
+            "len": len, "abs": abs, "round": round, "range": range,
+            "enumerate": enumerate, "zip": zip, "list": list, "dict": dict,
+            "tuple": tuple, "set": set, "float": float, "int": int,
+            "bool": bool, "str": str, "None": None, "True": True, "False": False,
+            "isinstance": isinstance, "getattr": getattr, "hasattr": hasattr,
+            "min": min, "max": max, "sum": sum, "print": print,
+        },
+        "pd":           pd,
+        "np":           np,
+        "IndicatorSpec": IndicatorSpec,
+        "ParamSpec":    ParamSpec,
+        "register":     _capture_register,
+        **_ind_fns,
+    }
+
+    try:
+        exec(compiled, namespace)
+    except Exception as e:
+        return {"error": "exec_error", "detail": str(e)}
+
+    spec = _captured[0] if _captured else namespace.get("spec")
+    if spec is None:
+        return {
+            "error": "no_spec_produced",
+            "detail": "Source must call register(IndicatorSpec(...)) or assign result to 'spec'",
+        }
+    if not isinstance(spec, IndicatorSpec):
+        return {
+            "error": "no_spec_produced",
+            "detail": f"Expected IndicatorSpec, got {type(spec).__name__}",
+        }
+
+    # Step 4: duplicate key check
+    if any(s.key == spec.key for s in INDICATOR_REGISTRY):
+        return {"error": "duplicate_key", "detail": spec.key}
+
+    # Step 5: schema validation (append temporarily, validate, rollback on failure)
+    INDICATOR_REGISTRY.append(spec)
+    try:
+        _validate_registry()
+    except ValueError as e:
+        INDICATOR_REGISTRY.pop()
+        return {"error": "schema_error", "detail": str(e)}
+
+    # Step 6: output column check
+    try:
+        test_df = _generate_sample_data(days=100, seed=0)
+        defaults = {p.name: p.default for p in spec.params}
+        result_df = spec.compute(test_df.copy(), defaults)
+        missing = [col for col in spec.outputs if col not in result_df.columns]
+        if missing:
+            INDICATOR_REGISTRY.pop()
+            return {"error": "output_columns_missing", "detail": missing}
+    except Exception as e:
+        INDICATOR_REGISTRY.pop()
+        return {"error": "compute_error", "detail": str(e)}
+
+    # Registration complete — mark provisional and seed defaults into state
+    _PROVISIONAL_KEYS.add(spec.key)
+    for p in spec.params:
+        if p.name not in _state["params"]:
+            _state["params"][p.name] = p.default
+
+    return {
+        "status":      "ok",
+        "key":         spec.key,
+        "name":        spec.name,
+        "group":       spec.group,
+        "provisional": True,
+        "params": [
+            {"name": p.name, "type": p.type, "default": p.default}
+            for p in spec.params
+        ],
+    }
+
 
 if __name__ == "__main__":
     mcp.run()  # defaults to stdio transport — required for Claude Desktop
