@@ -19,7 +19,6 @@ Changes from previous version
 """
 
 import pandas as pd
-from dataclasses import dataclass
 from typing import Dict, Any, Iterable
 from enum import Enum
 
@@ -27,7 +26,9 @@ from ..indicators import (
     pamrp, bbwp, sma, ema, rsi, stoch_rsi, adx, atr,
     supertrend, vwap, macd, ma
 )
-from ..indicators.registry import enabled_specs, topological_sort
+from ..indicators.registry import (
+    enabled_specs, topological_sort, build_defaults_from_registry,
+)
 from ..indicators import specs as _indicator_specs  # noqa: F401 — triggers registration
 
 
@@ -48,159 +49,87 @@ class EntryConflictMode(str, Enum):
     PREFER_SHORT = "prefer_short"
 
 
-@dataclass
+_STRATEGY_LEVEL_DEFAULTS: Dict[str, Any] = {
+    "trade_direction":        TradeDirection.LONG_ONLY,
+    "entry_operator":         ConditionOperator.AND,
+    "exit_operator":          ConditionOperator.OR,
+    "allow_same_bar_exit":    True,
+    "allow_same_bar_reversal": False,
+    "entry_conflict_mode":    EntryConflictMode.SKIP,
+    "position_size_pct":      100.0,
+    "use_kelly":              False,
+    "kelly_fraction":         0.5,
+}
+
+_DIRECTION_MAP: Dict[str, TradeDirection] = {
+    "Long Only":  TradeDirection.LONG_ONLY,
+    "Short Only": TradeDirection.SHORT_ONLY,
+    "Both":       TradeDirection.BOTH,
+    "long_only":  TradeDirection.LONG_ONLY,
+    "short_only": TradeDirection.SHORT_ONLY,
+    "both":       TradeDirection.BOTH,
+}
+
+
 class StrategyParams:
-    """All strategy parameters — fully exposed."""
+    """Dict-backed param container. Attribute-access shim keeps call sites unchanged."""
 
-    trade_direction: TradeDirection = TradeDirection.LONG_ONLY
-    entry_operator: ConditionOperator = ConditionOperator.AND
-    exit_operator: ConditionOperator = ConditionOperator.OR
-    allow_same_bar_exit: bool = True
-    allow_same_bar_reversal: bool = False
-    entry_conflict_mode: EntryConflictMode = EntryConflictMode.SKIP
+    def __init__(self, **overrides: Any) -> None:
+        d: Dict[str, Any] = {**_STRATEGY_LEVEL_DEFAULTS, **build_defaults_from_registry()}
+        d.update(overrides)
+        object.__setattr__(self, "_d", d)
 
-    # Position Sizing
-    position_size_pct: float = 100.0
-    use_kelly: bool = False
-    kelly_fraction: float = 0.5
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return object.__getattribute__(self, "_d")[name]
+        except KeyError:
+            raise AttributeError(f"StrategyParams has no attribute '{name}'")
 
-    # PAMRP
-    pamrp_enabled: bool = True
-    pamrp_entry_ma_length: int = 20
-    pamrp_entry_lookback: int = 350
-    pamrp_entry_ma_type: str = 'sma'
-    pamrp_entry_long: int = 20
-    pamrp_entry_short: int = 80
-    pamrp_exit_ma_length: int = 20
-    pamrp_exit_lookback: int = 350
-    pamrp_exit_ma_type: str = 'sma'
-    pamrp_exit_long: int = 70
-    pamrp_exit_short: int = 30
-
-    # BBWP
-    bbwp_enabled: bool = True
-    bbwp_length: int = 13
-    bbwp_lookback: int = 252
-    bbwp_sma_length: int = 5
-    bbwp_threshold_long: int = 50
-    bbwp_threshold_short: int = 50
-    bbwp_ma_filter: str = "disabled"
-
-    # ADX
-    adx_enabled: bool = False
-    adx_length: int = 14
-    adx_smoothing: int = 14
-    adx_threshold: int = 20
-    adx_require_di: bool = False
-
-    # MA Trend
-    ma_trend_enabled: bool = False
-    ma_fast_length: int = 50
-    ma_slow_length: int = 200
-    ma_type: str = "sma"
-
-    # RSI
-    rsi_enabled: bool = False
-    rsi_length: int = 14
-    rsi_oversold: int = 30
-    rsi_overbought: int = 70
-
-    # Volume
-    volume_enabled: bool = False
-    volume_ma_length: int = 20
-    volume_multiplier: float = 1.0
-
-    # Supertrend
-    supertrend_enabled: bool = False
-    supertrend_period: int = 10
-    supertrend_multiplier: float = 3.0
-
-    # VWAP
-    vwap_enabled: bool = False
-
-    # MACD
-    macd_enabled: bool = False
-    macd_fast: int = 12
-    macd_slow: int = 26
-    macd_signal: int = 9
-    macd_mode: str = "histogram"
-
-    # Stop Loss
-    stop_loss_enabled: bool = True
-    stop_loss_pct_long: float = 3.0
-    stop_loss_pct_short: float = 3.0
-
-    # Take Profit
-    take_profit_enabled: bool = False
-    take_profit_pct_long: float = 5.0
-    take_profit_pct_short: float = 5.0
-
-    # Trailing Stop
-    trailing_stop_enabled: bool = False
-    trailing_stop_pct: float = 2.0
-    trailing_stop_activation: float = 1.0
-
-    # ATR Trailing
-    atr_trailing_enabled: bool = False
-    atr_length: int = 14
-    atr_multiplier: float = 2.0
-
-    # PAMRP Exit
-    pamrp_exit_enabled: bool = True
-
-    # Stoch RSI Exit
-    stoch_rsi_exit_enabled: bool = False
-    stoch_rsi_length: int = 14
-    stoch_rsi_k: int = 3
-    stoch_rsi_d: int = 3
-    stoch_rsi_overbought: int = 80
-    stoch_rsi_oversold: int = 20
-
-    # Time Exit
-    time_exit_enabled: bool = False
-    time_exit_bars_long: int = 20
-    time_exit_bars_short: int = 20
-
-    # MA Exit
-    ma_exit_enabled: bool = False
-    ma_exit_fast: int = 10
-    ma_exit_slow: int = 20
-
-    # BBWP Exit
-    bbwp_exit_enabled: bool = False
-    bbwp_exit_threshold: int = 80
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__getattribute__(self, "_d")[name] = value
 
     def to_dict(self) -> Dict[str, Any]:
         result = {}
-        for k, v in self.__dict__.items():
+        for k, v in object.__getattribute__(self, "_d").items():
             result[k] = v.value if isinstance(v, Enum) else v
         return result
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'StrategyParams':
-        d = d.copy()
-        if 'trade_direction' in d and isinstance(d['trade_direction'], str):
-            d['trade_direction'] = TradeDirection(d['trade_direction'])
-        if 'entry_operator' in d and isinstance(d['entry_operator'], str):
-            d['entry_operator'] = ConditionOperator(d['entry_operator'].lower())
-        if 'exit_operator' in d and isinstance(d['exit_operator'], str):
-            d['exit_operator'] = ConditionOperator(d['exit_operator'].lower())
-        if 'entry_conflict_mode' in d and isinstance(d['entry_conflict_mode'], str):
-            d['entry_conflict_mode'] = EntryConflictMode(d['entry_conflict_mode'].lower())
-        # Layer 1: pamrp_length → entry/exit split (oldest sessions)
-        legacy_pamrp_length = d.pop('pamrp_length', None)
+    def from_dict(cls, d: Dict[str, Any]) -> "StrategyParams":
+        d = dict(d)
+        # PAMRP migration layer 1: pamrp_length → entry/exit split
+        legacy_pamrp_length = d.pop("pamrp_length", None)
         if legacy_pamrp_length is not None:
-            d.setdefault('pamrp_entry_length', legacy_pamrp_length)
-            d.setdefault('pamrp_exit_length', legacy_pamrp_length)
-        # Layer 2: pamrp_entry_length / pamrp_exit_length → ma_length (pre-FIX-11 sessions)
-        legacy_entry_length = d.pop('pamrp_entry_length', None)
+            d.setdefault("pamrp_entry_length", legacy_pamrp_length)
+            d.setdefault("pamrp_exit_length", legacy_pamrp_length)
+        # PAMRP migration layer 2: pamrp_entry/exit_length → ma_length
+        legacy_entry_length = d.pop("pamrp_entry_length", None)
         if legacy_entry_length is not None:
-            d.setdefault('pamrp_entry_ma_length', legacy_entry_length)
-        legacy_exit_length = d.pop('pamrp_exit_length', None)
+            d.setdefault("pamrp_entry_ma_length", legacy_entry_length)
+        legacy_exit_length = d.pop("pamrp_exit_length", None)
         if legacy_exit_length is not None:
-            d.setdefault('pamrp_exit_ma_length', legacy_exit_length)
-        valid_fields = set(cls.__dataclass_fields__.keys())
-        return cls(**{k: v for k, v in d.items() if k in valid_fields})
+            d.setdefault("pamrp_exit_ma_length", legacy_exit_length)
+        # UI migration: time_exit_bars (single) → long/short split
+        legacy_bars = d.pop("time_exit_bars", None)
+        if legacy_bars is not None:
+            d.setdefault("time_exit_bars_long", legacy_bars)
+            d.setdefault("time_exit_bars_short", legacy_bars)
+        # Enum coercions (handles both UI display strings and storage values)
+        td = d.get("trade_direction")
+        if isinstance(td, str):
+            d["trade_direction"] = _DIRECTION_MAP.get(td, TradeDirection.LONG_ONLY)
+        eo = d.get("entry_operator")
+        if isinstance(eo, str):
+            d["entry_operator"] = ConditionOperator(eo.lower())
+        xo = d.get("exit_operator")
+        if isinstance(xo, str):
+            d["exit_operator"] = ConditionOperator(xo.lower())
+        ecm = d.get("entry_conflict_mode")
+        if isinstance(ecm, str):
+            d["entry_conflict_mode"] = EntryConflictMode(ecm.lower())
+        # Filter to known keys only
+        known = set(_STRATEGY_LEVEL_DEFAULTS) | set(build_defaults_from_registry())
+        return cls(**{k: v for k, v in d.items() if k in known})
 
 
 class SignalGenerator:

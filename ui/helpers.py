@@ -59,87 +59,8 @@ PARAM_TO_WIDGET_KEY: Dict[str, str] = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 def params_to_strategy(p: Dict[str, Any]) -> StrategyParams:
-    """Convert the flat session-state params dict into a typed StrategyParams object."""
-    p = migrate_legacy_pamrp_params(p)
-    direction_map = {
-        'Long Only': TradeDirection.LONG_ONLY,
-        'Short Only': TradeDirection.SHORT_ONLY,
-        'Both': TradeDirection.BOTH,
-    }
-
-    def parse_operator(value: Any, default: ConditionOperator) -> ConditionOperator:
-        if isinstance(value, ConditionOperator):
-            return value
-        if isinstance(value, str):
-            try:
-                return ConditionOperator(value.lower())
-            except ValueError:
-                return default
-        return default
-
-    def parse_entry_conflict_mode(value: Any, default: EntryConflictMode) -> EntryConflictMode:
-        if isinstance(value, EntryConflictMode):
-            return value
-        if isinstance(value, str):
-            try:
-                return EntryConflictMode(value.lower())
-            except ValueError:
-                return default
-        return default
-
-    return StrategyParams(
-        trade_direction=direction_map.get(p.get('trade_direction', 'Long Only'), TradeDirection.LONG_ONLY),
-        entry_operator=parse_operator(p.get('entry_operator', 'and'), ConditionOperator.AND),
-        exit_operator=parse_operator(p.get('exit_operator', 'or'), ConditionOperator.OR),
-        allow_same_bar_exit=p.get('allow_same_bar_exit', True),
-        allow_same_bar_reversal=p.get('allow_same_bar_reversal', False),
-        entry_conflict_mode=parse_entry_conflict_mode(p.get('entry_conflict_mode', 'skip'), EntryConflictMode.SKIP),
-        position_size_pct=p.get('position_size_pct', 100.0),
-        use_kelly=p.get('use_kelly', False), kelly_fraction=p.get('kelly_fraction', 0.5),
-        pamrp_enabled=p.get('pamrp_enabled', True),
-        pamrp_entry_ma_length=p.get('pamrp_entry_ma_length', 20),
-        pamrp_entry_lookback=p.get('pamrp_entry_lookback', 350),
-        pamrp_entry_ma_type=p.get('pamrp_entry_ma_type', 'sma'),
-        pamrp_entry_long=p.get('pamrp_entry_long', 20), pamrp_entry_short=p.get('pamrp_entry_short', 80),
-        pamrp_exit_ma_length=p.get('pamrp_exit_ma_length', 20),
-        pamrp_exit_lookback=p.get('pamrp_exit_lookback', 350),
-        pamrp_exit_ma_type=p.get('pamrp_exit_ma_type', 'sma'),
-        pamrp_exit_long=p.get('pamrp_exit_long', 70), pamrp_exit_short=p.get('pamrp_exit_short', 30),
-        bbwp_enabled=p.get('bbwp_enabled', True), bbwp_length=p.get('bbwp_length', 13),
-        bbwp_lookback=p.get('bbwp_lookback', 252), bbwp_sma_length=p.get('bbwp_sma_length', 5),
-        bbwp_threshold_long=p.get('bbwp_threshold_long', 50), bbwp_threshold_short=p.get('bbwp_threshold_short', 50),
-        bbwp_ma_filter=p.get('bbwp_ma_filter', 'disabled'),
-        adx_enabled=p.get('adx_enabled', False), adx_length=p.get('adx_length', 14),
-        adx_smoothing=p.get('adx_smoothing', 14), adx_threshold=p.get('adx_threshold', 20),
-        ma_trend_enabled=p.get('ma_trend_enabled', False), ma_fast_length=p.get('ma_fast_length', 50),
-        ma_slow_length=p.get('ma_slow_length', 200), ma_type=p.get('ma_type', 'sma'),
-        rsi_enabled=p.get('rsi_enabled', False), rsi_length=p.get('rsi_length', 14),
-        rsi_oversold=p.get('rsi_oversold', 30), rsi_overbought=p.get('rsi_overbought', 70),
-        volume_enabled=p.get('volume_enabled', False), volume_ma_length=p.get('volume_ma_length', 20),
-        volume_multiplier=p.get('volume_multiplier', 1.0),
-        supertrend_enabled=p.get('supertrend_enabled', False), supertrend_period=p.get('supertrend_period', 10),
-        supertrend_multiplier=p.get('supertrend_multiplier', 3.0),
-        vwap_enabled=p.get('vwap_enabled', False),
-        macd_enabled=p.get('macd_enabled', False), macd_fast=p.get('macd_fast', 12),
-        macd_slow=p.get('macd_slow', 26), macd_signal=p.get('macd_signal', 9),
-        stop_loss_enabled=p.get('stop_loss_enabled', True),
-        stop_loss_pct_long=p.get('stop_loss_pct_long', 3.0), stop_loss_pct_short=p.get('stop_loss_pct_short', 3.0),
-        take_profit_enabled=p.get('take_profit_enabled', False),
-        take_profit_pct_long=p.get('take_profit_pct_long', 5.0), take_profit_pct_short=p.get('take_profit_pct_short', 5.0),
-        trailing_stop_enabled=p.get('trailing_stop_enabled', False), trailing_stop_pct=p.get('trailing_stop_pct', 2.0),
-        atr_trailing_enabled=p.get('atr_trailing_enabled', False), atr_length=p.get('atr_length', 14),
-        atr_multiplier=p.get('atr_multiplier', 2.0),
-        pamrp_exit_enabled=p.get('pamrp_exit_enabled', True),
-        stoch_rsi_exit_enabled=p.get('stoch_rsi_exit_enabled', False),
-        stoch_rsi_length=p.get('stoch_rsi_length', 14), stoch_rsi_k=p.get('stoch_rsi_k', 3),
-        stoch_rsi_d=p.get('stoch_rsi_d', 3), stoch_rsi_overbought=p.get('stoch_rsi_overbought', 80),
-        stoch_rsi_oversold=p.get('stoch_rsi_oversold', 20),
-        time_exit_enabled=p.get('time_exit_enabled', False),
-        time_exit_bars_long=p.get('time_exit_bars', 20), time_exit_bars_short=p.get('time_exit_bars', 20),
-        ma_exit_enabled=p.get('ma_exit_enabled', False), ma_exit_fast=p.get('ma_exit_fast', 10),
-        ma_exit_slow=p.get('ma_exit_slow', 20),
-        bbwp_exit_enabled=p.get('bbwp_exit_enabled', False), bbwp_exit_threshold=p.get('bbwp_exit_threshold', 80),
-    )
+    """Convert the flat session-state params dict into a StrategyParams object."""
+    return StrategyParams.from_dict(p)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 """
-Registry schema and population tests (Phase 1 & 2).
+Registry schema and population tests (Phase 1, 2 & 3).
 
 These tests verify that:
 1. Every legacy StrategyParams field appears in the registry (or is a known strategy-level param)
@@ -8,11 +8,12 @@ These tests verify that:
 4. validate_registry() passes
 5. All compute/signal callables are named functions (not lambdas)
 6. calculate_indicators produces the expected column set (Phase 2)
+7. StrategyParams dict-backed shim behaves correctly (Phase 3)
 """
 import numpy as np
 import pandas as pd
 import pytest
-from src.strategy import StrategyParams, SignalGenerator
+from src.strategy import StrategyParams, SignalGenerator, TradeDirection
 from src.indicators.registry import (
     INDICATOR_REGISTRY,
     STRATEGY_LEVEL_PARAMS,
@@ -89,9 +90,9 @@ def test_categorical_params_have_choices():
 # ─── Coverage tests ───────────────────────────────────────────────────────────
 
 def test_all_legacy_params_present_in_registry():
-    """Every StrategyParams field is either in the registry or a known strategy-level param."""
-    legacy_fields = set(StrategyParams.__dataclass_fields__.keys())
-    indicator_fields = legacy_fields - STRATEGY_LEVEL_PARAMS
+    """Every indicator param in StrategyParams defaults is covered by the registry."""
+    sp_defaults = set(StrategyParams().to_dict().keys())
+    indicator_fields = sp_defaults - STRATEGY_LEVEL_PARAMS
     registry_params = set(build_defaults_from_registry().keys())
     missing = indicator_fields - registry_params
     assert not missing, (
@@ -100,24 +101,20 @@ def test_all_legacy_params_present_in_registry():
     )
 
 
-def test_registry_defaults_match_dataclass_defaults():
-    """Registry default for each param must equal the StrategyParams dataclass default."""
-    defaults_dc = {
-        k: v.default
-        for k, v in StrategyParams.__dataclass_fields__.items()
-        if k not in STRATEGY_LEVEL_PARAMS
-    }
+def test_registry_defaults_match_strategyparams_defaults():
+    """Registry default for each param must equal the StrategyParams default."""
+    sp = StrategyParams()
+    defaults_sp = {k: v for k, v in sp.to_dict().items() if k not in STRATEGY_LEVEL_PARAMS}
     defaults_reg = build_defaults_from_registry()
 
     mismatches = {}
-    for name, dc_default in defaults_dc.items():
-        if name in defaults_reg:
-            if defaults_reg[name] != dc_default:
-                mismatches[name] = (dc_default, defaults_reg[name])
+    for name, sp_default in defaults_sp.items():
+        if name in defaults_reg and defaults_reg[name] != sp_default:
+            mismatches[name] = (sp_default, defaults_reg[name])
 
     assert not mismatches, (
         "Registry defaults differ from StrategyParams defaults:\n"
-        + "\n".join(f"  {k}: dataclass={v[0]!r}, registry={v[1]!r}" for k, v in mismatches.items())
+        + "\n".join(f"  {k}: sp={v[0]!r}, registry={v[1]!r}" for k, v in mismatches.items())
     )
 
 
@@ -248,3 +245,88 @@ def test_calculate_indicators_does_not_mutate_input(sample_df):
     p = StrategyParams(pamrp_enabled=True, bbwp_enabled=True)
     SignalGenerator(p).calculate_indicators(sample_df)
     assert set(sample_df.columns) == original_cols
+
+
+# ─── Phase 3: StrategyParams dict-shim tests ──────────────────────────────────
+
+def test_strategyparams_attribute_access_matches_dict():
+    """Every key in to_dict() is reachable as an attribute (non-enum params match directly)."""
+    from enum import Enum
+    p = StrategyParams()
+    d = p.to_dict()
+    for key, val in d.items():
+        attr = getattr(p, key)
+        # Enum attrs store the enum object; to_dict serializes them to .value
+        normalized = attr.value if isinstance(attr, Enum) else attr
+        assert normalized == val, f"Attribute {key!r} mismatch: {normalized!r} != {val!r}"
+
+
+def test_strategyparams_unknown_attr_raises():
+    """Accessing an unknown attribute must raise AttributeError."""
+    p = StrategyParams()
+    with pytest.raises(AttributeError):
+        _ = p.bogus_attr_xyz
+
+
+def test_strategyparams_setattr_writes_through():
+    """Setting an attribute must update to_dict()."""
+    p = StrategyParams()
+    p.rsi_length = 21
+    assert p.to_dict()["rsi_length"] == 21
+    assert p.rsi_length == 21
+
+
+def test_strategyparams_overrides_applied():
+    """Constructor keyword args override registry defaults."""
+    p = StrategyParams(rsi_length=99, bbwp_enabled=False)
+    assert p.rsi_length == 99
+    assert p.bbwp_enabled is False
+
+
+def test_strategyparams_legacy_pamrp_length_migration():
+    """from_dict: pamrp_length (layer 1) → pamrp_entry_ma_length / pamrp_exit_ma_length."""
+    p = StrategyParams.from_dict({"pamrp_length": 30})
+    assert p.pamrp_entry_ma_length == 30
+    assert p.pamrp_exit_ma_length == 30
+
+
+def test_strategyparams_legacy_pamrp_entry_length_migration():
+    """from_dict: pamrp_entry_length (layer 2) → pamrp_entry_ma_length."""
+    p = StrategyParams.from_dict({"pamrp_entry_length": 42})
+    assert p.pamrp_entry_ma_length == 42
+
+
+def test_strategyparams_from_dict_direction_ui_strings():
+    """from_dict: UI display strings ('Long Only', 'Short Only', 'Both') are coerced."""
+    assert StrategyParams.from_dict({"trade_direction": "Long Only"}).trade_direction == TradeDirection.LONG_ONLY
+    assert StrategyParams.from_dict({"trade_direction": "Short Only"}).trade_direction == TradeDirection.SHORT_ONLY
+    assert StrategyParams.from_dict({"trade_direction": "Both"}).trade_direction == TradeDirection.BOTH
+
+
+def test_strategyparams_from_dict_direction_storage_strings():
+    """from_dict: storage-format strings ('long_only' etc.) are also coerced."""
+    assert StrategyParams.from_dict({"trade_direction": "long_only"}).trade_direction == TradeDirection.LONG_ONLY
+    assert StrategyParams.from_dict({"trade_direction": "both"}).trade_direction == TradeDirection.BOTH
+
+
+def test_strategyparams_from_dict_unknown_keys_ignored():
+    """from_dict: unrecognised keys are silently dropped."""
+    p = StrategyParams.from_dict({"rsi_length": 10, "totally_unknown_key": 999})
+    assert p.rsi_length == 10
+    with pytest.raises(AttributeError):
+        _ = p.totally_unknown_key
+
+
+def test_strategyparams_to_dict_serializes_enums():
+    """to_dict must return plain strings for enum values."""
+    p = StrategyParams(trade_direction=TradeDirection.SHORT_ONLY)
+    d = p.to_dict()
+    assert isinstance(d["trade_direction"], str)
+    assert d["trade_direction"] == "short_only"
+
+
+def test_strategyparams_time_exit_bars_migration():
+    """from_dict: time_exit_bars (legacy UI key) fans out to long/short split."""
+    p = StrategyParams.from_dict({"time_exit_bars": 15})
+    assert p.time_exit_bars_long == 15
+    assert p.time_exit_bars_short == 15
