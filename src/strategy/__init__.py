@@ -22,10 +22,6 @@ import pandas as pd
 from typing import Dict, Any, Iterable
 from enum import Enum
 
-from ..indicators import (
-    pamrp, bbwp, sma, ema, rsi, stoch_rsi, adx, atr,
-    supertrend, vwap, macd, ma
-)
 from ..indicators.registry import (
     enabled_specs, topological_sort, build_defaults_from_registry,
 )
@@ -184,82 +180,29 @@ class SignalGenerator:
 
     def generate_entry_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        p  = self.params
+        p = self.params
+        params = p.to_dict()
+        td = p.trade_direction
+        long_or_both  = td in (TradeDirection.LONG_ONLY,  TradeDirection.BOTH)
+        short_or_both = td in (TradeDirection.SHORT_ONLY, TradeDirection.BOTH)
 
-        long_masks: list[pd.Series] = []
+        long_masks:  list[pd.Series] = []
         short_masks: list[pd.Series] = []
 
-        if p.pamrp_enabled:
-            long_masks.append(df['pamrp_entry'] < p.pamrp_entry_long)
-            short_masks.append(df['pamrp_entry'] > p.pamrp_entry_short)
+        for spec in enabled_specs(params):
+            if spec.group != "entry":
+                continue
+            if long_or_both and spec.long_signal is not None:
+                long_masks.append(spec.long_signal(df, params))
+            if short_or_both and spec.short_signal is not None:
+                short_masks.append(spec.short_signal(df, params))
 
-        if p.bbwp_enabled:
-            long_mask = df['bbwp'] < p.bbwp_threshold_long
-            short_mask = df['bbwp'] > p.bbwp_threshold_short
-
-            if p.bbwp_ma_filter == 'decreasing':
-                bbwp_ma_ok   = df['bbwp_sma'] < df['bbwp_sma'].shift(1)
-                long_mask = long_mask & bbwp_ma_ok
-                short_mask = short_mask & bbwp_ma_ok
-            elif p.bbwp_ma_filter == 'increasing':
-                bbwp_ma_ok   = df['bbwp_sma'] > df['bbwp_sma'].shift(1)
-                long_mask = long_mask & bbwp_ma_ok
-                short_mask = short_mask & bbwp_ma_ok
-
-            long_masks.append(long_mask)
-            short_masks.append(short_mask)
-
-        if p.adx_enabled and 'adx' in df.columns:
-            long_mask = df['adx'] > p.adx_threshold
-            short_mask = long_mask
-            if p.adx_require_di:
-                long_mask = long_mask & (df['di_plus'] > df['di_minus'])
-                short_mask = short_mask & (df['di_minus'] > df['di_plus'])
-            long_masks.append(long_mask)
-            short_masks.append(short_mask)
-
-        if p.ma_trend_enabled and 'ma_fast' in df.columns:
-            long_masks.append(df['ma_fast'] > df['ma_slow'])
-            short_masks.append(df['ma_fast'] < df['ma_slow'])
-
-        if p.rsi_enabled and 'rsi' in df.columns:
-            long_masks.append(df['rsi'] < p.rsi_oversold)
-            short_masks.append(df['rsi'] > p.rsi_overbought)
-
-        if p.volume_enabled and 'volume_ma' in df.columns:
-            vol_ok = df['volume'] > df['volume_ma'] * p.volume_multiplier
-            long_masks.append(vol_ok)
-            short_masks.append(vol_ok)
-
-        if p.supertrend_enabled and 'st_direction' in df.columns:
-            # [FIX-ST] Corrected convention: +1 = bullish, -1 = bearish
-            # Old code (wrong): st_direction < 0 for long, > 0 for short
-            long_masks.append(df['st_direction'] > 0)
-            short_masks.append(df['st_direction'] < 0)
-
-        if p.vwap_enabled and 'vwap' in df.columns:
-            long_masks.append(df['close'] > df['vwap'])
-            short_masks.append(df['close'] < df['vwap'])
-
-        if p.macd_enabled and 'macd_hist' in df.columns:
-            if p.macd_mode == 'histogram':
-                long_mask = df['macd_hist'] > 0
-                short_mask = df['macd_hist'] < 0
-            elif p.macd_mode == 'crossover':
-                long_mask = df['macd'] > df['macd_signal']
-                short_mask = df['macd'] < df['macd_signal']
-            else:  # zero-line
-                long_mask = df['macd'] > 0
-                short_mask = df['macd'] < 0
-            long_masks.append(long_mask)
-            short_masks.append(short_mask)
-
-        long_signal = self._combine_condition_masks(long_masks, p.entry_operator, df.index)
+        long_signal  = self._combine_condition_masks(long_masks,  p.entry_operator, df.index)
         short_signal = self._combine_condition_masks(short_masks, p.entry_operator, df.index)
 
-        if p.trade_direction == TradeDirection.LONG_ONLY:
+        if td == TradeDirection.LONG_ONLY:
             short_signal = pd.Series(False, index=df.index)
-        elif p.trade_direction == TradeDirection.SHORT_ONLY:
+        elif td == TradeDirection.SHORT_ONLY:
             long_signal  = pd.Series(False, index=df.index)
 
         df['entry_long']  = long_signal.fillna(False)
@@ -269,28 +212,21 @@ class SignalGenerator:
 
     def generate_exit_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        p  = self.params
+        p = self.params
+        params = p.to_dict()
 
-        exit_long_masks: list[pd.Series] = []
+        exit_long_masks:  list[pd.Series] = []
         exit_short_masks: list[pd.Series] = []
 
-        if p.pamrp_exit_enabled:
-            exit_long_masks.append(df['pamrp_exit'] > p.pamrp_exit_long)
-            exit_short_masks.append(df['pamrp_exit'] < p.pamrp_exit_short)
+        for spec in enabled_specs(params):
+            if spec.group != "exit":
+                continue
+            if spec.long_signal is not None:
+                exit_long_masks.append(spec.long_signal(df, params))
+            if spec.short_signal is not None:
+                exit_short_masks.append(spec.short_signal(df, params))
 
-        if p.stoch_rsi_exit_enabled and 'stoch_k' in df.columns:
-            exit_long_masks.append(df['stoch_k'] > p.stoch_rsi_overbought)
-            exit_short_masks.append(df['stoch_k'] < p.stoch_rsi_oversold)
-
-        if p.ma_exit_enabled and 'exit_ma_fast' in df.columns:
-            exit_long_masks.append(df['exit_ma_fast'] < df['exit_ma_slow'])
-            exit_short_masks.append(df['exit_ma_fast'] > df['exit_ma_slow'])
-
-        if p.bbwp_exit_enabled and 'bbwp' in df.columns:
-            exit_long_masks.append(df['bbwp'] > p.bbwp_exit_threshold)
-            exit_short_masks.append(df['bbwp'] < p.bbwp_exit_threshold)
-
-        exit_long = self._combine_condition_masks(exit_long_masks, p.exit_operator, df.index)
+        exit_long  = self._combine_condition_masks(exit_long_masks,  p.exit_operator, df.index)
         exit_short = self._combine_condition_masks(exit_short_masks, p.exit_operator, df.index)
 
         df['exit_long_signal']  = exit_long.fillna(False)
