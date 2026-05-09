@@ -203,6 +203,7 @@ class TestStrategy:
         }, index=idx)
         params = StrategyParams(
             pamrp_enabled=True,
+            bbwp_enabled=False,
             rsi_enabled=True,
             entry_operator=ConditionOperator.OR,
             trade_direction=TradeDirection.BOTH,
@@ -222,6 +223,7 @@ class TestStrategy:
         }, index=idx)
         params = StrategyParams(
             pamrp_enabled=True,
+            bbwp_enabled=False,
             rsi_enabled=True,
             entry_operator=ConditionOperator.AND,
             trade_direction=TradeDirection.BOTH,
@@ -248,7 +250,8 @@ class TestStrategy:
         result = SignalGenerator(params).generate_exit_signals(df)
 
         assert result['exit_long_signal'].tolist() == [True, True, True]
-        assert result['exit_short_signal'].tolist() == [False, False, False]
+        # bbwp=70 < threshold=80 → short exit fires on bar 0 (via OR)
+        assert result['exit_short_signal'].tolist() == [True, False, False]
 
     def test_exit_operator_and_requires_all_signal_exits(self):
         """AND exit mode should require every enabled signal exit condition to pass."""
