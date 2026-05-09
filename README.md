@@ -103,6 +103,8 @@ make test                                            # run unit tests
 
 All indicators off by default. Enable what you need in the sidebar.
 
+The canonical list of indicators and their parameters lives in `src/indicators/specs/`. Each file in that directory defines one `IndicatorSpec` — adding a new indicator means adding one file there and registering it in `src/indicators/specs/__init__.py`. See `docs/contributing/adding-an-indicator.md` for a step-by-step walkthrough.
+
 ## Backtest Engine
 
 Key execution rules:

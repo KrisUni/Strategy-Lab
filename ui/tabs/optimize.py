@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.optimize import optimize_strategy
 from src.strategy import TradeDirection
+from src.indicators.registry import INDICATOR_REGISTRY
 from ui.helpers import get_active_filters_display, apply_best_params_callback
 from ui.state_migration import migrate_legacy_pamrp_pins
 from ui.charts import (
@@ -16,43 +17,6 @@ from ui.charts import (
     create_stitched_equity_chart,
     create_optimization_chart,PLOTLY_CONFIG
 )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Pinnable parameter registry
-# ─────────────────────────────────────────────────────────────────────────────
-
-_PINNABLE = {
-    'pamrp_enabled': [('pamrp_entry_ma_length', 'MA Length'), ('pamrp_entry_lookback', 'Lookback'),
-        ('pamrp_entry_ma_type', 'MA Type'), ('pamrp_entry_long', 'Entry Long'), ('pamrp_entry_short', 'Entry Short')],
-    'pamrp_exit_enabled': [('pamrp_exit_ma_length', 'MA Length'), ('pamrp_exit_lookback', 'Lookback'),
-        ('pamrp_exit_ma_type', 'MA Type'), ('pamrp_exit_long', 'Exit Long'), ('pamrp_exit_short', 'Exit Short')],
-    'bbwp_enabled': [('bbwp_length', 'Length'), ('bbwp_lookback', 'Lookback'), ('bbwp_sma_length', 'SMA Length'),
-        ('bbwp_ma_filter', 'MA Filter'), ('bbwp_threshold_long', 'Thresh Long'), ('bbwp_threshold_short', 'Thresh Short')],
-    'adx_enabled': [('adx_length', 'Length'), ('adx_smoothing', 'Smoothing'), ('adx_threshold', 'Threshold')],
-    'ma_trend_enabled': [('ma_type', 'Type'), ('ma_fast_length', 'Fast'), ('ma_slow_length', 'Slow')],
-    'rsi_enabled': [('rsi_length', 'Length'), ('rsi_oversold', 'Oversold'), ('rsi_overbought', 'Overbought')],
-    'volume_enabled': [('volume_ma_length', 'MA Length'), ('volume_multiplier', 'Multiplier')],
-    'supertrend_enabled': [('supertrend_period', 'Period'), ('supertrend_multiplier', 'Multiplier')],
-    'macd_enabled': [('macd_fast', 'Fast'), ('macd_slow', 'Slow'), ('macd_signal', 'Signal')],
-    'stop_loss_enabled': [('stop_loss_pct_long', '% Long'), ('stop_loss_pct_short', '% Short')],
-    'take_profit_enabled': [('take_profit_pct_long', '% Long'), ('take_profit_pct_short', '% Short')],
-    'trailing_stop_enabled': [('trailing_stop_pct', 'Trail %')],
-    'atr_trailing_enabled': [('atr_length', 'Length'), ('atr_multiplier', 'Multiplier')],
-    'time_exit_enabled': [('time_exit_bars', 'Max Bars')],
-    'ma_exit_enabled': [('ma_exit_fast', 'Fast'), ('ma_exit_slow', 'Slow')],
-    'bbwp_exit_enabled': [('bbwp_exit_threshold', 'Threshold')],
-}
-
-_INDICATOR_LABELS = {
-    'pamrp_enabled': 'PAMRP', 'pamrp_exit_enabled': 'PAMRP Exit',
-    'bbwp_enabled': 'BBWP', 'adx_enabled': 'ADX',
-    'ma_trend_enabled': 'MA Trend', 'rsi_enabled': 'RSI', 'volume_enabled': 'Volume',
-    'supertrend_enabled': 'Supertrend', 'macd_enabled': 'MACD',
-    'stop_loss_enabled': 'Stop Loss', 'take_profit_enabled': 'Take Profit',
-    'trailing_stop_enabled': 'Trailing Stop', 'atr_trailing_enabled': 'ATR Trail',
-    'time_exit_enabled': 'Time Exit', 'ma_exit_enabled': 'MA Exit', 'bbwp_exit_enabled': 'BBWP Exit',
-}
 
 _SIDEBAR_TO_OPT_DIRECTION = {
     'Long Only': 'long_only',
@@ -149,10 +113,16 @@ def render_optimize_tab() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_pin_expander() -> None:
+    # Derive pinnable specs from the registry: enabled specs with ≥1 optimizable non-enable param
     enabled_pinnable = [
-        (ind_key, _INDICATOR_LABELS.get(ind_key, ind_key), params_list)
-        for ind_key, params_list in _PINNABLE.items()
-        if st.session_state.params.get(ind_key, False)
+        (
+            spec.enable_param,
+            spec.name,
+            [(p.name, p.label or p.name) for p in spec.params if p.name != spec.enable_param and p.optimize],
+        )
+        for spec in INDICATOR_REGISTRY
+        if st.session_state.params.get(spec.enable_param, False)
+        and any(p.name != spec.enable_param and p.optimize for p in spec.params)
     ]
     pinned_set: set = migrate_legacy_pamrp_pins(st.session_state.pinned_params)
 
@@ -182,7 +152,7 @@ def _render_pin_expander() -> None:
     if pinned_set:
         pinned_names = ', '.join(
             next((pl for pk, pl in p_list if pk == k), k)
-            for ind_key, _, p_list in enabled_pinnable
+            for _, _, p_list in enabled_pinnable
             for k in pinned_set if any(pk == k for pk, _ in p_list)
         )
         st.caption(f"🔒 Pinned: **{pinned_names}**")

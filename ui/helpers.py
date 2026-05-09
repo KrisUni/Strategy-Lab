@@ -6,7 +6,6 @@ Pure helper functions and constants shared across sidebar and tab modules.
   - params_to_strategy()        — Dict → StrategyParams
   - get_active_filters_display() — list of enabled indicator labels
   - calculate_beta_alpha()       — beta / alpha / correlation vs benchmark
-  - PARAM_TO_WIDGET_KEY          — sidebar widget-key lookup
   - apply_best_params_callback() — Streamlit on_click callback for "Apply Best Params"
 """
 
