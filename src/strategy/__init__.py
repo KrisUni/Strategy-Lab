@@ -27,6 +27,8 @@ from ..indicators import (
     pamrp, bbwp, sma, ema, rsi, stoch_rsi, adx, atr,
     supertrend, vwap, macd, ma
 )
+from ..indicators.registry import enabled_specs, topological_sort
+from ..indicators import specs as _indicator_specs  # noqa: F401 — triggers registration
 
 
 class TradeDirection(Enum):
@@ -230,108 +232,24 @@ class SignalGenerator:
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        p  = self.params
+        params = self.params.to_dict()
 
-        # PAMRP entry/exit can use independent MA window, lookback, and MA type.
-        vol = df['volume'] if 'volume' in df.columns else None
-        if p.pamrp_enabled:
-            df['pamrp_entry'] = pamrp(
-                df['close'], p.pamrp_entry_ma_length, p.pamrp_entry_lookback,
-                p.pamrp_entry_ma_type, vol,
-            )
-        else:
+        for spec in topological_sort(enabled_specs(params)):
+            df = spec.compute(df, params)
+
+        # Legacy fallback columns: signal generation guards access with
+        # if p.X_enabled, so these don't affect trades, but external
+        # callers may expect them.
+        if 'pamrp_entry' not in df.columns:
             df['pamrp_entry'] = 50.0
-
-        if p.pamrp_exit_enabled:
-            entry_reusable = (
-                p.pamrp_enabled
-                and p.pamrp_exit_ma_length == p.pamrp_entry_ma_length
-                and p.pamrp_exit_lookback  == p.pamrp_entry_lookback
-                and p.pamrp_exit_ma_type   == p.pamrp_entry_ma_type
-            )
-            if entry_reusable:
-                df['pamrp_exit'] = df['pamrp_entry']
-            else:
-                df['pamrp_exit'] = pamrp(
-                    df['close'], p.pamrp_exit_ma_length, p.pamrp_exit_lookback,
-                    p.pamrp_exit_ma_type, vol,
-                )
-        else:
+        if 'pamrp_exit' not in df.columns:
             df['pamrp_exit'] = 50.0
-
-        # Keep the legacy column for callers that still expect one PAMRP series.
-        if p.pamrp_enabled:
-            df['pamrp'] = df['pamrp_entry']
-        elif p.pamrp_exit_enabled:
-            df['pamrp'] = df['pamrp_exit']
-        else:
+        if 'pamrp' not in df.columns:
             df['pamrp'] = 50.0
-
-        # BBWP
-        if p.bbwp_enabled or p.bbwp_exit_enabled:
-            df['bbwp']     = bbwp(df['close'], p.bbwp_length, p.bbwp_lookback)
-            df['bbwp_sma'] = sma(df['bbwp'], p.bbwp_sma_length)
-        else:
-            df['bbwp']     = 50.0
+        if 'bbwp' not in df.columns:
+            df['bbwp'] = 50.0
+        if 'bbwp_sma' not in df.columns:
             df['bbwp_sma'] = 50.0
-
-        # ADX
-        if p.adx_enabled:
-            df['di_plus'], df['di_minus'], df['adx'] = adx(
-                df['high'], df['low'], df['close'], p.adx_length, p.adx_smoothing
-            )
-
-        # MA Trend
-        if p.ma_trend_enabled:
-            df['ma_fast'] = ma(df['close'], p.ma_fast_length, p.ma_type)
-            df['ma_slow'] = ma(df['close'], p.ma_slow_length, p.ma_type)
-
-        # RSI
-        if p.rsi_enabled:
-            df['rsi'] = rsi(df['close'], p.rsi_length)
-
-        # Stoch RSI
-        # [FIX-SR] stoch_length added as explicit second argument.
-        # Defaults to stoch_rsi_length (same value) — no behaviour change
-        # for existing configs. Expose a separate UI param in the future if needed.
-        if p.stoch_rsi_exit_enabled:
-            df['stoch_k'], df['stoch_d'] = stoch_rsi(
-                df['close'],
-                p.stoch_rsi_length,   # rsi_length
-                p.stoch_rsi_length,   # stoch_length  ← [FIX-SR]
-                p.stoch_rsi_k,
-                p.stoch_rsi_d,
-            )
-
-        # Volume
-        if p.volume_enabled and 'volume' in df.columns:
-            df['volume_ma'] = sma(df['volume'], p.volume_ma_length)
-
-        # Supertrend
-        if p.supertrend_enabled:
-            df['supertrend'], df['st_direction'] = supertrend(
-                df['high'], df['low'], df['close'],
-                p.supertrend_period, p.supertrend_multiplier
-            )
-
-        # VWAP
-        if p.vwap_enabled and 'volume' in df.columns:
-            df['vwap'] = vwap(df['high'], df['low'], df['close'], df['volume'])
-
-        # MACD
-        if p.macd_enabled:
-            df['macd'], df['macd_signal'], df['macd_hist'] = macd(
-                df['close'], p.macd_fast, p.macd_slow, p.macd_signal
-            )
-
-        # ATR (for trailing stop)
-        if p.atr_trailing_enabled:
-            df['atr'] = atr(df['high'], df['low'], df['close'], p.atr_length)
-
-        # MA Exit
-        if p.ma_exit_enabled:
-            df['exit_ma_fast'] = ema(df['close'], p.ma_exit_fast)
-            df['exit_ma_slow'] = ema(df['close'], p.ma_exit_slow)
 
         return df
 

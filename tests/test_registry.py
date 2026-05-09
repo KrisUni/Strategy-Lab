@@ -1,5 +1,5 @@
 """
-Registry schema and population tests (Phase 1).
+Registry schema and population tests (Phase 1 & 2).
 
 These tests verify that:
 1. Every legacy StrategyParams field appears in the registry (or is a known strategy-level param)
@@ -7,9 +7,12 @@ These tests verify that:
 3. No duplicate param names or indicator keys
 4. validate_registry() passes
 5. All compute/signal callables are named functions (not lambdas)
+6. calculate_indicators produces the expected column set (Phase 2)
 """
+import numpy as np
+import pandas as pd
 import pytest
-from src.strategy import StrategyParams
+from src.strategy import StrategyParams, SignalGenerator
 from src.indicators.registry import (
     INDICATOR_REGISTRY,
     STRATEGY_LEVEL_PARAMS,
@@ -179,3 +182,69 @@ def test_registry_covers_18_indicators():
         f"Expected 18 indicators, got {len(INDICATOR_REGISTRY)}. "
         "Update this count if adding a new indicator."
     )
+
+
+# ─── Phase 2: calculate_indicators column-set tests ───────────────────────────
+
+@pytest.fixture(scope="module")
+def sample_df():
+    np.random.seed(42)
+    n = 300
+    close = 100 * np.exp(np.cumsum(np.random.normal(0, 0.01, n)))
+    idx = pd.date_range("2020-01-01", periods=n, freq="D")
+    return pd.DataFrame({
+        "open": close * 0.999, "high": close * 1.005,
+        "low": close * 0.995, "close": close,
+        "volume": np.random.randint(1000, 5000, n).astype(float),
+    }, index=idx)
+
+
+def test_calculate_indicators_all_disabled_has_fallback_columns(sample_df):
+    """When all indicators disabled, legacy fallback columns are still present."""
+    p = StrategyParams(
+        pamrp_enabled=False, pamrp_exit_enabled=False,
+        bbwp_enabled=False, bbwp_exit_enabled=False,
+    )
+    result = SignalGenerator(p).calculate_indicators(sample_df)
+    for col in ("pamrp_entry", "pamrp_exit", "pamrp", "bbwp", "bbwp_sma"):
+        assert col in result.columns, f"Missing fallback column: {col}"
+    assert (result["pamrp_entry"] == 50.0).all()
+    assert (result["bbwp"] == 50.0).all()
+
+
+def test_calculate_indicators_all_enabled_has_expected_columns(sample_df):
+    """When all indicators enabled, all output columns are present."""
+    p = StrategyParams(
+        pamrp_enabled=True, pamrp_exit_enabled=True,
+        bbwp_enabled=True, bbwp_exit_enabled=True,
+        adx_enabled=True, ma_trend_enabled=True,
+        rsi_enabled=True, stoch_rsi_exit_enabled=True,
+        volume_enabled=True, supertrend_enabled=True,
+        vwap_enabled=True, macd_enabled=True,
+        atr_trailing_enabled=True, ma_exit_enabled=True,
+    )
+    result = SignalGenerator(p).calculate_indicators(sample_df)
+    expected = {
+        "pamrp_entry", "pamrp_exit", "pamrp",
+        "bbwp", "bbwp_sma",
+        "adx", "di_plus", "di_minus",
+        "ma_fast", "ma_slow",
+        "rsi",
+        "stoch_k", "stoch_d",
+        "volume_ma",
+        "supertrend", "st_direction",
+        "vwap",
+        "macd", "macd_signal", "macd_hist",
+        "atr",
+        "exit_ma_fast", "exit_ma_slow",
+    }
+    missing = expected - set(result.columns)
+    assert not missing, f"Missing columns: {missing}"
+
+
+def test_calculate_indicators_does_not_mutate_input(sample_df):
+    """calculate_indicators must not modify the original DataFrame."""
+    original_cols = set(sample_df.columns)
+    p = StrategyParams(pamrp_enabled=True, bbwp_enabled=True)
+    SignalGenerator(p).calculate_indicators(sample_df)
+    assert set(sample_df.columns) == original_cols
