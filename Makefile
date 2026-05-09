@@ -6,7 +6,7 @@ APP := app.py
 STAMP := $(VENV)/.ready
 
 .DEFAULT_GOAL := run
-.PHONY: run clear
+.PHONY: run clear test regression
 
 $(STAMP): requirements.txt
 	@echo "Setting up virtual environment..."
@@ -18,6 +18,12 @@ $(STAMP): requirements.txt
 run: $(STAMP)
 	@echo "Starting Strategy Lab..."
 	@$(STREAMLIT) run $(APP)
+
+test: $(STAMP)
+	@$(VENV)/bin/python -m pytest tests/ -v
+
+regression: $(STAMP)
+	@$(VENV)/bin/python -m pytest tests/regression/ -v
 
 clear:
 	@echo "Removing $(VENV)..."

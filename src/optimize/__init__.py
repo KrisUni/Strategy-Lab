@@ -23,6 +23,8 @@ except ImportError:
     raise ImportError("Install optuna: pip install optuna")
 
 from ..strategy import StrategyParams, TradeDirection, ConditionOperator, EntryConflictMode
+from ..indicators.registry import INDICATOR_REGISTRY
+from ..indicators import specs as _indicator_specs  # noqa: F401 — triggers registration
 from ..backtest import (
     BacktestEngine,
     BacktestResults,
@@ -47,30 +49,17 @@ def _suppress_warnings():
 # Parameter classification
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Entry-signal params — instability HERE means no reliable edge
-_ENTRY_PARAM_PREFIXES = (
-    'pamrp_entry_ma_length', 'pamrp_entry_lookback', 'pamrp_entry_ma_type', 'pamrp_entry',
-    'bbwp_length', 'bbwp_lookback', 'bbwp_sma', 'bbwp_threshold', 'bbwp_ma',
-    'adx_length', 'adx_smoothing', 'adx_threshold',
-    'ma_fast_length', 'ma_slow_length', 'ma_type',
-    'rsi_length', 'rsi_oversold', 'rsi_overbought',
-    'volume_ma_length', 'volume_multiplier',
-    'supertrend_period', 'supertrend_multiplier',
-    'macd_fast', 'macd_slow', 'macd_signal',
-)
-
-# Exit/risk params — adapting between regimes is EXPECTED, not a red flag
-_EXIT_PARAM_PREFIXES = (
-    'pamrp_exit_ma_length', 'pamrp_exit_lookback', 'pamrp_exit_ma_type',
-    'stop_loss_pct', 'take_profit_pct', 'trailing_stop_pct',
-    'atr_length', 'atr_multiplier',
-    'time_exit_bars', 'ma_exit_fast', 'ma_exit_slow',
-    'bbwp_exit_threshold', 'pamrp_exit',
+# Entry-signal params — instability HERE means no reliable edge.
+# Derived from the registry: any param owned by a spec with group="entry".
+_ENTRY_PARAM_NAMES: frozenset = frozenset(
+    p.name
+    for spec in INDICATOR_REGISTRY if spec.group == "entry"
+    for p in spec.params
 )
 
 
 def _is_entry_param(name: str) -> bool:
-    return any(name.startswith(p) for p in _ENTRY_PARAM_PREFIXES)
+    return name in _ENTRY_PARAM_NAMES
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -158,49 +147,38 @@ class OptimizationResult:
 def _count_active_params(
     enabled_filters: Dict[str, bool],
     pinned_params: Optional[Dict[str, Any]] = None,
+    trade_direction: TradeDirection = TradeDirection.BOTH,
 ) -> int:
     """
-    Estimate numeric parameters that will be optimized.
-    Each enabled indicator contributes an approximate dimension count.
-    Pinned params are subtracted — they consume no trial dimensions.
+    Count parameters that will be optimized via Optuna for the given config.
+    Derived from the registry — no hardcoded dim counts needed.
+    Pinned params are subtracted; direction-only params are skipped when
+    the trade direction makes them irrelevant.
     """
-    dims_per_indicator = {
-        'pamrp_enabled': 4,
-        'bbwp_enabled': 6,
-        'adx_enabled': 3,
-        'ma_trend_enabled': 3,
-        'rsi_enabled': 3,
-        'volume_enabled': 2,
-        'supertrend_enabled': 2,
-        'vwap_enabled': 0,
-        'macd_enabled': 3,
-        'stop_loss_enabled': 2,
-        'take_profit_enabled': 2,
-        'trailing_stop_enabled': 1,
-        'atr_trailing_enabled': 2,
-        'time_exit_enabled': 1,
-        'ma_exit_enabled': 2,
-        'bbwp_exit_enabled': 1,
-        'pamrp_exit_enabled': 3,
-        'stoch_rsi_exit_enabled': 0,
-    }
-    total = sum(
-        dims_per_indicator.get(k, 2)
-        for k, v in enabled_filters.items() if v
-    )
-    # Each pinned param removes one dimension from the search space
+    long_or_both  = trade_direction in (TradeDirection.LONG_ONLY,  TradeDirection.BOTH)
+    short_or_both = trade_direction in (TradeDirection.SHORT_ONLY, TradeDirection.BOTH)
+    total = 0
+    for spec in INDICATOR_REGISTRY:
+        if not enabled_filters.get(spec.enable_param, False):
+            continue
+        for p in spec.params:
+            if not p.optimize:
+                continue
+            if p.direction == "long"  and not long_or_both:
+                continue
+            if p.direction == "short" and not short_or_both:
+                continue
+            total += 1
     n_pinned = len(pinned_params) if pinned_params else 0
     return max(total - n_pinned, 1)
 
 
 def _count_enabled_indicators(enabled_filters: Dict[str, bool]) -> int:
-    """Count distinct entry-filter indicators only."""
-    entry_keys = {
-        'pamrp_enabled', 'bbwp_enabled', 'adx_enabled', 'ma_trend_enabled',
-        'rsi_enabled', 'volume_enabled', 'supertrend_enabled', 'vwap_enabled',
-        'macd_enabled',
-    }
-    return sum(1 for k, v in enabled_filters.items() if k in entry_keys and v)
+    """Count distinct entry-group indicators that are enabled."""
+    return sum(
+        1 for spec in INDICATOR_REGISTRY
+        if spec.group == "entry" and enabled_filters.get(spec.enable_param, False)
+    )
 
 
 def _build_trial_budget_warnings(
@@ -453,163 +431,70 @@ class BayesianOptimizer:
 
     def _build_params_from_trial(self, trial) -> StrategyParams:
         """
-        Build StrategyParams from an Optuna trial.
+        Build StrategyParams from an Optuna trial using the indicator registry.
 
-        For each parameter, if it is listed in self.pinned_params, its pinned
-        value is used directly without calling trial.suggest_*.  This removes
-        the parameter from the search space, reducing effective dimensionality
-        and improving TPE convergence for the remaining free params.
+        For each enabled spec, each optimizable ParamSpec is suggested via Optuna
+        (subject to pinning and direction filtering). Disabled specs use registry
+        defaults. Strategy-level params come from pinned_params or class defaults.
         """
-        pp = self.pinned_params  # dict of {param_name: fixed_value}
-
-        def p_operator(name: str, default: ConditionOperator) -> ConditionOperator:
-            value = pp.get(name, default)
-            if isinstance(value, ConditionOperator):
-                return value
-            if isinstance(value, str):
-                return ConditionOperator(value.lower())
-            return default
-
-        def p_entry_conflict_mode(name: str, default: EntryConflictMode) -> EntryConflictMode:
-            value = pp.get(name, default)
-            if isinstance(value, EntryConflictMode):
-                return value
-            if isinstance(value, str):
-                return EntryConflictMode(value.lower())
-            return default
-
-        def p_bool(name: str, default: bool) -> bool:
-            value = pp.get(name, default)
-            if isinstance(value, str):
-                return value.lower() in {'1', 'true', 'yes', 'on'}
-            return bool(value)
-
-        # Local helpers — check pin first, fall back to Optuna suggest
-        def p_int(name: str, lo: int, hi: int) -> int:
-            return int(pp[name]) if name in pp else trial.suggest_int(name, lo, hi)
-
-        def p_float(name: str, lo: float, hi: float) -> float:
-            return float(pp[name]) if name in pp else trial.suggest_float(name, lo, hi)
-
-        def p_cat(name: str, choices: list):
-            return pp[name] if name in pp else trial.suggest_categorical(name, choices)
-
+        pp = self.pinned_params
         ef = self.enabled_filters
-        long_or_both  = self.trade_direction in [TradeDirection.LONG_ONLY,  TradeDirection.BOTH]
-        short_or_both = self.trade_direction in [TradeDirection.SHORT_ONLY, TradeDirection.BOTH]
+        long_or_both  = self.trade_direction in (TradeDirection.LONG_ONLY,  TradeDirection.BOTH)
+        short_or_both = self.trade_direction in (TradeDirection.SHORT_ONLY, TradeDirection.BOTH)
 
-        pe    = ef.get('pamrp_enabled', False)
-        pe_ml = p_int('pamrp_entry_ma_length', 10, 50) if pe else 20
-        pe_lb = p_int('pamrp_entry_lookback', 100, 500) if pe else 350
-        pe_mt = p_cat('pamrp_entry_ma_type', ['sma', 'ema', 'wma', 'rma']) if pe else 'sma'
-        pel   = p_int('pamrp_entry_long', 10, 40) if pe and long_or_both else 20
-        pes   = p_int('pamrp_entry_short', 60, 95) if pe and short_or_both else 80
+        params_dict: Dict[str, Any] = {}
 
-        pxe   = ef.get('pamrp_exit_enabled', False)
-        px_ml = p_int('pamrp_exit_ma_length', 10, 50) if pxe else 20
-        px_lb = p_int('pamrp_exit_lookback', 100, 500) if pxe else 350
-        px_mt = p_cat('pamrp_exit_ma_type', ['sma', 'ema', 'wma', 'rma']) if pxe else 'sma'
-        pxl   = p_int('pamrp_exit_long', 55, 90) if pxe and long_or_both else 70
-        pxs   = p_int('pamrp_exit_short', 10, 45) if pxe and short_or_both else 30
+        for spec in INDICATOR_REGISTRY:
+            enabled = ef.get(spec.enable_param, False)
+            for param in spec.params:
+                # Direction-only params: skip suggest when direction doesn't apply
+                if param.direction == "long"  and not long_or_both:
+                    params_dict[param.name] = param.default
+                    continue
+                if param.direction == "short" and not short_or_both:
+                    params_dict[param.name] = param.default
+                    continue
+                # Pinned: use fixed value, don't consume a trial dimension
+                if param.name in pp:
+                    params_dict[param.name] = pp[param.name]
+                    continue
+                # Disabled spec or non-optimizable param: use registry default
+                if not enabled or not param.optimize:
+                    params_dict[param.name] = param.default
+                    continue
+                # Suggest from trial
+                if param.type == "int":
+                    params_dict[param.name] = trial.suggest_int(
+                        param.name, int(param.min), int(param.max)
+                    )
+                elif param.type == "float":
+                    params_dict[param.name] = trial.suggest_float(
+                        param.name, float(param.min), float(param.max)
+                    )
+                elif param.type == "categorical":
+                    params_dict[param.name] = trial.suggest_categorical(
+                        param.name, list(param.choices)
+                    )
+                else:
+                    params_dict[param.name] = param.default
 
-        be   = ef.get('bbwp_enabled', True)
-        bl   = p_int('bbwp_length',         8,   21) if be else 13
-        blb  = p_int('bbwp_lookback',      50,  1000) if be else 252
-        bsma = p_int('bbwp_sma_length',     3,   10) if be else 5
-        bmf  = p_cat('bbwp_ma_filter', ['disabled', 'decreasing']) if be else 'disabled'
-        btl  = p_int('bbwp_threshold_long',  30,  70) if be and long_or_both  else 50
-        bts  = p_int('bbwp_threshold_short', 30,  70) if be and short_or_both else 50
+        # Strategy-level params: always from pinned or class defaults (not registry)
+        params_dict["trade_direction"] = self.trade_direction
+        for name in ("entry_operator", "exit_operator", "allow_same_bar_exit",
+                     "allow_same_bar_reversal", "entry_conflict_mode"):
+            if name in pp:
+                params_dict[name] = pp[name]
 
-        ae  = ef.get('adx_enabled', False)
-        al  = p_int('adx_length',    10, 20) if ae else 14
-        asm = p_int('adx_smoothing', 10, 20) if ae else 14
-        at  = p_int('adx_threshold', 15, 60) if ae else 20
-
-        mae = ef.get('ma_trend_enabled', False)
-        maf = p_int('ma_fast_length',  20, 500) if mae else 50
-        mas = p_int('ma_slow_length', 100, 1000) if mae else 200
-        mat = p_cat('ma_type', ['sma', 'ema'])  if mae else 'sma'
-
-        re  = ef.get('rsi_enabled', False)
-        rl  = p_int('rsi_length',    7,  21) if re else 14
-        ros = p_int('rsi_oversold',  20, 40) if re else 30
-        rob = p_int('rsi_overbought', 60, 80) if re else 70
-
-        ve  = ef.get('volume_enabled', False)
-        vml = p_int('volume_ma_length',  10,  30) if ve else 20
-        vm  = p_float('volume_multiplier', 0.8, 1.5) if ve else 1.0
-
-        ste = ef.get('supertrend_enabled', False)
-        stp = p_int('supertrend_period',         7,  100) if ste else 10
-        stm = p_float('supertrend_multiplier', 1.5, 10.0) if ste else 3.0
-
-        vwe = ef.get('vwap_enabled', False)
-
-        mce  = ef.get('macd_enabled', False)
-        mcf  = p_int('macd_fast',    8,  15) if mce else 12
-        mcs  = p_int('macd_slow',   20,  30) if mce else 26
-        mcsi = p_int('macd_signal',  6,  12) if mce else 9
-
-        sle = ef.get('stop_loss_enabled', True)
-        sll = p_float('stop_loss_pct_long',  0.5, 30.0) if sle else 3.0
-        sls = p_float('stop_loss_pct_short', 0.5, 30.0) if sle else 3.0
-
-        tpe = ef.get('take_profit_enabled', False)
-        tpl = p_float('take_profit_pct_long',  1.0, 50.0) if tpe else 5.0
-        tps = p_float('take_profit_pct_short', 1.0, 50.0) if tpe else 5.0
-
-        tse = ef.get('trailing_stop_enabled', False)
-        tsp = p_float('trailing_stop_pct', 1.0, 5.0) if tse else 2.0
-
-        ate = ef.get('atr_trailing_enabled', False)
-        atl = p_int('atr_length',         10,  20) if ate else 14
-        atm = p_float('atr_multiplier', 1.5, 4.0) if ate else 2.0
-   
-        sre = ef.get('stoch_rsi_exit_enabled', False)
-
-        txe = ef.get('time_exit_enabled', False)
-        txb = p_int('time_exit_bars', 10, 50) if txe else 20
-
-        mxe = ef.get('ma_exit_enabled', False)
-        mxf = p_int('ma_exit_fast',  5, 15) if mxe else 10
-        mxs = p_int('ma_exit_slow', 15, 30) if mxe else 20
-
-        bxe = ef.get('bbwp_exit_enabled', False)
-        bxt = p_int('bbwp_exit_threshold', 70, 90) if bxe else 80
-
-        has_exit = any([sle, tpe, tse, ate, pxe, sre, txe, mxe, bxe])
-        if not has_exit:
-            pxe = True
-
-        return StrategyParams(
-            trade_direction=self.trade_direction,
-            entry_operator=p_operator('entry_operator', ConditionOperator.AND),
-            exit_operator=p_operator('exit_operator', ConditionOperator.OR),
-            allow_same_bar_exit=p_bool('allow_same_bar_exit', True),
-            allow_same_bar_reversal=p_bool('allow_same_bar_reversal', False),
-            entry_conflict_mode=p_entry_conflict_mode('entry_conflict_mode', EntryConflictMode.SKIP),
-            pamrp_enabled=pe,
-            pamrp_entry_ma_length=pe_ml, pamrp_entry_lookback=pe_lb, pamrp_entry_ma_type=pe_mt,
-            pamrp_entry_long=pel, pamrp_entry_short=pes,
-            pamrp_exit_ma_length=px_ml, pamrp_exit_lookback=px_lb, pamrp_exit_ma_type=px_mt,
-            pamrp_exit_long=pxl, pamrp_exit_short=pxs,
-            bbwp_enabled=be, bbwp_length=bl, bbwp_lookback=blb, bbwp_sma_length=bsma,
-            bbwp_threshold_long=btl, bbwp_threshold_short=bts, bbwp_ma_filter=bmf,
-            adx_enabled=ae, adx_length=al, adx_smoothing=asm, adx_threshold=at,
-            ma_trend_enabled=mae, ma_fast_length=maf, ma_slow_length=mas, ma_type=mat,
-            rsi_enabled=re, rsi_length=rl, rsi_oversold=ros, rsi_overbought=rob,
-            volume_enabled=ve, volume_ma_length=vml, volume_multiplier=vm,
-            supertrend_enabled=ste, supertrend_period=stp, supertrend_multiplier=stm,
-            vwap_enabled=vwe, macd_enabled=mce, macd_fast=mcf, macd_slow=mcs, macd_signal=mcsi,
-            stop_loss_enabled=sle, stop_loss_pct_long=sll, stop_loss_pct_short=sls,
-            take_profit_enabled=tpe, take_profit_pct_long=tpl, take_profit_pct_short=tps,
-            trailing_stop_enabled=tse, trailing_stop_pct=tsp,
-            atr_trailing_enabled=ate, atr_length=atl, atr_multiplier=atm,
-            pamrp_exit_enabled=pxe, stoch_rsi_exit_enabled=sre,
-            time_exit_enabled=txe, time_exit_bars_long=txb, time_exit_bars_short=txb,
-            ma_exit_enabled=mxe, ma_exit_fast=mxf, ma_exit_slow=mxs,
-            bbwp_exit_enabled=bxe, bbwp_exit_threshold=bxt,
+        # Ensure at least one exit is active
+        has_exit = any(
+            ef.get(spec.enable_param, False)
+            for spec in INDICATOR_REGISTRY
+            if spec.group in ("exit", "risk")
         )
+        if not has_exit:
+            params_dict["pamrp_exit_enabled"] = True
+
+        return StrategyParams.from_dict(params_dict)
 
     # ── Optuna study runner ───────────────────────────────────────────────────
 

@@ -126,6 +126,67 @@ Combine with a directional signal.
 
 ---
 
+## 3.1 Creating New Indicators
+
+You can register new indicators when the existing library doesn't fit the
+regime. This is a deliberate act, not a default move. Before creating one,
+you must justify why an existing indicator can't be adapted via parameters.
+
+**When creation is appropriate:**
+
+- The regime calls for a structurally distinct signal not in the library
+  (e.g., volatility breakout when only mean-reversion oscillators exist).
+- You can describe the edge in one sentence, same standard as any other
+  hypothesis.
+- The indicator is widely-recognised market microstructure logic (Keltner,
+  Donchian, Chaikin Money Flow), not a personally-invented composite.
+
+**When creation is not appropriate:**
+
+- You're stacking another filter onto a strategy that already underperforms.
+  Adding indicators is not how you fix a bad thesis.
+- The "new" indicator is a small variation on an existing one (different MA
+  type, different lookback). Use parameters, not a new spec.
+- You're searching for something that works. That's data mining. Discard
+  the hypothesis instead.
+
+**Procedure:**
+
+1. `list_indicators` — confirm the signal doesn't already exist under another name.
+2. Write the spec source. No import statements — use `pd`, `np`, `IndicatorSpec`,
+   `ParamSpec`, `register`, and any `src.indicators` compute primitives (`sma`, `ema`,
+   `rsi`, `atr`, etc.) which are pre-loaded in the execution namespace.
+   Compute and signal functions must be named callables, not lambdas.
+3. `register_indicator(spec_source)` — runs syntax check, import whitelist,
+   schema validation, and output column check automatically. Fix any errors
+   it reports before proceeding.
+4. `set_params({"new_key_enabled": True})` + `run_backtest()` — verify the
+   indicator produces trades and the signal is directionally sensible.
+5. Continue the normal characterize → optimize → permutation loop.
+   The two-indicator hard limit still applies.
+6. The indicator is provisional until it passes `run_permutation_test` (p < 0.05).
+   Treat results with extra skepticism until then — a new indicator that
+   immediately produces great metrics is more likely look-ahead or curve-fitting
+   than a genuine discovery.
+7. Promotion from provisional to permanent is a human gate. Do not automate it.
+
+**Failure modes specific to LLM-generated indicators:**
+
+- **Subtle look-ahead.** It is easy to write `df['close'].rolling(N).max()`
+  thinking it's a backward window when in some libraries it isn't. The
+  validator does NOT yet catch look-ahead automatically — read your own
+  compute function critically before registering. Any use of `.shift(-N)`,
+  future prices, or non-causal rolling windows is disqualifying.
+- **Curve-fit by construction.** You can write an indicator that "predicts"
+  the training set because you tuned its constants while looking at the
+  chart. The permutation test catches this. Trust the test, not the chart.
+- **Confirmation framing.** You'll be tempted to create an indicator that
+  confirms a hypothesis you've already committed to. Reverse the burden:
+  try to construct an indicator that invalidates your thesis. If you can't,
+  that's stronger evidence than confirmation.
+
+---
+
 ## 4. Baseline Backtest — Read It as a Diagnostic
 
 Run `run_backtest` with sensible default params. This is not pass/fail.
@@ -269,6 +330,9 @@ That is data mining disguised as research.
 - **Max drawdown < 5% with meaningful returns** — verify costs are applied.
 - **Profit factor > 4 with < 50 trades** — confidence interval, not edge.
 - **All P&L from a single regime window** — regime-specific, not structural.
+- **Provisional indicator with great backtest** — re-run with strict permutation.
+  New indicators have an inflated false-positive rate; treat their first good
+  result with extra skepticism.
 
 When something looks too good, it usually is. Say so.
 

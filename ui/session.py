@@ -45,7 +45,7 @@ def get_default_params() -> Dict[str, Any]:
         'pamrp_exit_enabled': False,
         'stoch_rsi_exit_enabled': False, 'stoch_rsi_length': 14, 'stoch_rsi_k': 3, 'stoch_rsi_d': 3,
         'stoch_rsi_overbought': 80, 'stoch_rsi_oversold': 20,
-        'time_exit_enabled': False, 'time_exit_bars': 20,
+        'time_exit_enabled': False, 'time_exit_bars_long': 20, 'time_exit_bars_short': 20,
         'ma_exit_enabled': False, 'ma_exit_fast': 10, 'ma_exit_slow': 20,
         'bbwp_exit_enabled': False, 'bbwp_exit_threshold': 80,
         # ── Visual indicators (display-only, not strategy filters) ────────────
