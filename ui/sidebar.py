@@ -12,6 +12,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 
 from src.data import fetch_yfinance, generate_sample_data, load_csv
+from ui.sidebar_renderer import render_indicator_section
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,71 +193,7 @@ def _render_entry_indicators(p: dict) -> None:
         horizontal=True,
         key="eop",
     )
-
-    with st.expander("📊 PAMRP", expanded=False):
-        p['pamrp_enabled'] = st.toggle("Enable", p['pamrp_enabled'], key="pe")
-        if p['pamrp_enabled']:
-            p['pamrp_entry_ma_length'] = st.slider("MA Length", 5, 100, p['pamrp_entry_ma_length'], key="ple_ma")
-            p['pamrp_entry_lookback']  = st.slider("Lookback", 50, 500, p['pamrp_entry_lookback'], key="ple_lb")
-            p['pamrp_entry_ma_type']   = st.selectbox("MA Type", ["sma", "ema", "wma", "rma"],
-                index=["sma", "ema", "wma", "rma"].index(p['pamrp_entry_ma_type']), key="ple_mt")
-            p['pamrp_entry_long']  = st.slider("Entry Long", 5, 50, p['pamrp_entry_long'], key="pel")
-            p['pamrp_entry_short'] = st.slider("Entry Short", 50, 95, p['pamrp_entry_short'], key="pes")
-
-
-    with st.expander("📊 BBWP", expanded=False):
-        p['bbwp_enabled'] = st.toggle("Enable", p['bbwp_enabled'], key="be")
-        if p['bbwp_enabled']:
-            p['bbwp_length'] = st.slider("Length", 5, 30, p['bbwp_length'], key="bl")
-            p['bbwp_lookback'] = st.slider("Lookback", 50, 400, p['bbwp_lookback'], key="blb")
-            p['bbwp_sma_length'] = st.slider("SMA", 2, 15, p['bbwp_sma_length'], key="bsma")
-            p['bbwp_threshold_long'] = st.slider("Thresh Long", 20, 80, p['bbwp_threshold_long'], key="btl")
-            p['bbwp_threshold_short'] = st.slider("Thresh Short", 20, 80, p['bbwp_threshold_short'], key="bts")
-            p['bbwp_ma_filter'] = st.selectbox("MA Filter", ["disabled", "decreasing", "increasing"],
-                index=["disabled", "decreasing", "increasing"].index(p['bbwp_ma_filter']), key="bmf")
-
-    with st.expander("📈 ADX", expanded=False):
-        p['adx_enabled'] = st.toggle("Enable", p['adx_enabled'], key="ae")
-        if p['adx_enabled']:
-            p['adx_length'] = st.slider("Length", 7, 21, p['adx_length'], key="al")
-            p['adx_threshold'] = st.slider("Threshold", 10, 40, p['adx_threshold'], key="at")
-
-    with st.expander("📈 MA Trend", expanded=False):
-        p['ma_trend_enabled'] = st.toggle("Enable", p['ma_trend_enabled'], key="mae")
-        if p['ma_trend_enabled']:
-            p['ma_type'] = st.selectbox("Type", ["sma", "ema"],
-                index=["sma", "ema"].index(p['ma_type']), key="mat")
-            p['ma_fast_length'] = st.slider("Fast", 10, 100, p['ma_fast_length'], key="maf")
-            p['ma_slow_length'] = st.slider("Slow", 50, 400, p['ma_slow_length'], key="mas")
-
-    with st.expander("📈 RSI", expanded=False):
-        p['rsi_enabled'] = st.toggle("Enable", p['rsi_enabled'], key="re")
-        if p['rsi_enabled']:
-            p['rsi_length'] = st.slider("Length", 5, 21, p['rsi_length'], key="rl")
-            p['rsi_oversold'] = st.slider("Oversold", 15, 45, p['rsi_oversold'], key="ros")
-            p['rsi_overbought'] = st.slider("Overbought", 55, 85, p['rsi_overbought'], key="rob")
-
-    with st.expander("📊 Volume", expanded=False):
-        p['volume_enabled'] = st.toggle("Enable", p['volume_enabled'], key="ve")
-        if p['volume_enabled']:
-            p['volume_ma_length'] = st.slider("MA Length", 10, 50, p['volume_ma_length'], key="vml")
-            p['volume_multiplier'] = st.slider("Multiplier", 0.5, 2.0, p['volume_multiplier'], 0.1, key="vm")
-
-    with st.expander("📈 Supertrend", expanded=False):
-        p['supertrend_enabled'] = st.toggle("Enable", p['supertrend_enabled'], key="ste")
-        if p['supertrend_enabled']:
-            p['supertrend_period'] = st.slider("Period", 5, 20, p['supertrend_period'], key="stp")
-            p['supertrend_multiplier'] = st.slider("Mult", 1.0, 5.0, p['supertrend_multiplier'], 0.5, key="stm")
-
-    with st.expander("📈 VWAP", expanded=False):
-        p['vwap_enabled'] = st.toggle("Enable", p['vwap_enabled'], key="vwe")
-
-    with st.expander("📈 MACD", expanded=False):
-        p['macd_enabled'] = st.toggle("Enable", p['macd_enabled'], key="mce")
-        if p['macd_enabled']:
-            p['macd_fast'] = st.slider("Fast", 5, 20, p['macd_fast'], key="mcf")
-            p['macd_slow'] = st.slider("Slow", 15, 40, p['macd_slow'], key="mcs")
-            p['macd_signal'] = st.slider("Signal", 5, 15, p['macd_signal'], key="mcsi")
+    render_indicator_section("entry", p)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -318,60 +255,5 @@ def _render_exit_indicators(p: dict) -> None:
         help="Applies to signal-based exits below. Stop-loss, take-profit, trailing, ATR, and time exits still trigger independently.",
     )
 
-    with st.expander("🛑 Stop Loss", expanded=False):
-        p['stop_loss_enabled'] = st.toggle("Enable", p['stop_loss_enabled'], key="sle")
-        if p['stop_loss_enabled']:
-            p['stop_loss_pct_long'] = st.slider("% Long", 0.5, 15.0, p['stop_loss_pct_long'], 0.5, key="sll")
-            p['stop_loss_pct_short'] = st.slider("% Short", 0.5, 15.0, p['stop_loss_pct_short'], 0.5, key="sls")
-
-    with st.expander("🎯 Take Profit", expanded=False):
-        p['take_profit_enabled'] = st.toggle("Enable", p['take_profit_enabled'], key="tpe")
-        if p['take_profit_enabled']:
-            p['take_profit_pct_long'] = st.slider("% Long", 1.0, 30.0, p['take_profit_pct_long'], 0.5, key="tpl")
-            p['take_profit_pct_short'] = st.slider("% Short", 1.0, 30.0, p['take_profit_pct_short'], 0.5, key="tps")
-
-    with st.expander("📉 Trailing Stop", expanded=False):
-        p['trailing_stop_enabled'] = st.toggle("Enable", p['trailing_stop_enabled'], key="tse")
-        if p['trailing_stop_enabled']:
-            p['trailing_stop_pct'] = st.slider("Trail %", 0.5, 10.0, p['trailing_stop_pct'], 0.5, key="tsp")
-
-    with st.expander("📉 ATR Trail", expanded=False):
-        p['atr_trailing_enabled'] = st.toggle("Enable", p['atr_trailing_enabled'], key="ate")
-        if p['atr_trailing_enabled']:
-            p['atr_length'] = st.slider("Length", 7, 21, p['atr_length'], key="atl")
-            p['atr_multiplier'] = st.slider("Mult", 1.0, 5.0, p['atr_multiplier'], 0.5, key="atm")
-
-    with st.expander("📊 PAMRP Exit", expanded=False):
-        p['pamrp_exit_enabled'] = st.toggle("Enable", p['pamrp_exit_enabled'], key="pxe")
-        if p['pamrp_exit_enabled']:
-            p['pamrp_exit_ma_length'] = st.slider("MA Length", 5, 100, p['pamrp_exit_ma_length'], key="pxl_ma")
-            p['pamrp_exit_lookback']  = st.slider("Lookback", 50, 500, p['pamrp_exit_lookback'], key="pxl_lb")
-            p['pamrp_exit_ma_type']   = st.selectbox("MA Type", ["sma", "ema", "wma", "rma"],
-                index=["sma", "ema", "wma", "rma"].index(p['pamrp_exit_ma_type']), key="pxl_mt")
-            p['pamrp_exit_long']  = st.slider("Exit Long (overbought)", 50, 100, p['pamrp_exit_long'],  key="pxl_exit")
-            p['pamrp_exit_short'] = st.slider("Exit Short (oversold)",  0,   50,  p['pamrp_exit_short'], key="pxs_exit")
-
-    with st.expander("📈 Stoch RSI Exit", expanded=False):
-        p['stoch_rsi_exit_enabled'] = st.toggle("Enable", p['stoch_rsi_exit_enabled'], key="sre")
-        if p['stoch_rsi_exit_enabled']:
-            p['stoch_rsi_length'] = st.slider("Length", 7, 21, p['stoch_rsi_length'], key="srl")
-            p['stoch_rsi_k'] = st.slider("K", 2, 5, p['stoch_rsi_k'], key="srk")
-            p['stoch_rsi_d'] = st.slider("D", 2, 5, p['stoch_rsi_d'], key="srd")
-            p['stoch_rsi_overbought'] = st.slider("OB", 60, 90, p['stoch_rsi_overbought'], key="srob")
-            p['stoch_rsi_oversold'] = st.slider("OS", 10, 40, p['stoch_rsi_oversold'], key="sros")
-
-    with st.expander("⏱️ Time Exit", expanded=False):
-        p['time_exit_enabled'] = st.toggle("Enable", p['time_exit_enabled'], key="txe")
-        if p['time_exit_enabled']:
-            p['time_exit_bars'] = st.slider("Max Bars", 5, 100, p['time_exit_bars'], key="txb")
-
-    with st.expander("📈 MA Exit", expanded=False):
-        p['ma_exit_enabled'] = st.toggle("Enable", p['ma_exit_enabled'], key="mxe")
-        if p['ma_exit_enabled']:
-            p['ma_exit_fast'] = st.slider("Fast", 3, 20, p['ma_exit_fast'], key="mxf")
-            p['ma_exit_slow'] = st.slider("Slow", 10, 40, p['ma_exit_slow'], key="mxs")
-
-    with st.expander("📊 BBWP Exit", expanded=False):
-        p['bbwp_exit_enabled'] = st.toggle("Enable", p['bbwp_exit_enabled'], key="bxe")
-        if p['bbwp_exit_enabled']:
-            p['bbwp_exit_threshold'] = st.slider("Threshold", 60, 95, p['bbwp_exit_threshold'], key="bxt")
+    render_indicator_section("exit", p)
+    render_indicator_section("risk", p)
