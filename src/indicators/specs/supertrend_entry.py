@@ -23,7 +23,7 @@ def short_signal_supertrend(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Seri
 
 
 register(IndicatorSpec(
-    key="supertrend",
+    key="supertrend_entry",
     name="Supertrend",
     group="entry",
     order=7,

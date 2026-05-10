@@ -244,6 +244,7 @@ class TestStrategy:
         params = StrategyParams(
             pamrp_exit_enabled=True,
             bbwp_exit_enabled=True,
+            bbwp_exit_threshold_short=80,
             exit_operator=ConditionOperator.OR,
         )
 

@@ -19,7 +19,7 @@ def short_signal_rsi(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
 
 
 register(IndicatorSpec(
-    key="rsi",
+    key="rsi_entry",
     name="RSI",
     group="entry",
     order=5,

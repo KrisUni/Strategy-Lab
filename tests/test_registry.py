@@ -143,9 +143,9 @@ def test_enabled_specs_filters_by_enable_param():
     assert "stop_loss" in enabled_keys
 
     # These are disabled by default
-    assert "rsi" not in enabled_keys
-    assert "macd" not in enabled_keys
-    assert "supertrend" not in enabled_keys
+    assert "rsi_entry" not in enabled_keys
+    assert "macd_entry" not in enabled_keys
+    assert "supertrend_entry" not in enabled_keys
 
 
 def test_topological_sort_puts_deps_first():
@@ -175,8 +175,8 @@ def test_pamrp_exit_comes_after_pamrp_entry_in_sort():
 
 def test_registry_covers_18_indicators():
     """Exact indicator count check — update when adding new indicators."""
-    assert len(INDICATOR_REGISTRY) == 18, (
-        f"Expected 18 indicators, got {len(INDICATOR_REGISTRY)}. "
+    assert len(INDICATOR_REGISTRY) == 24, (
+        f"Expected 24 indicators, got {len(INDICATOR_REGISTRY)}. "
         "Update this count if adding a new indicator."
     )
 
@@ -226,7 +226,7 @@ def test_calculate_indicators_all_enabled_has_expected_columns(sample_df):
         "bbwp", "bbwp_sma",
         "adx", "di_plus", "di_minus",
         "ma_fast", "ma_slow",
-        "rsi",
+            "rsi",
         "stoch_k", "stoch_d",
         "volume_ma",
         "supertrend", "st_direction",

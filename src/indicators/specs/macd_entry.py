@@ -33,7 +33,7 @@ def short_signal_macd(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
 
 
 register(IndicatorSpec(
-    key="macd",
+    key="macd_entry",
     name="MACD",
     group="entry",
     order=9,

@@ -166,7 +166,7 @@ def test_build_params_from_trial_disabled_uses_defaults(minimal_df, pamrp_only_f
 
     # RSI is disabled — its params must equal registry defaults
     for spec in INDICATOR_REGISTRY:
-        if spec.key != "rsi":
+        if spec.key != "rsi_entry":
             continue
         for p in spec.params:
             assert params.to_dict()[p.name] == defaults[p.name], (

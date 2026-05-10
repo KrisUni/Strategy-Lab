@@ -24,7 +24,7 @@ def short_signal_volume(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
 
 
 register(IndicatorSpec(
-    key="volume",
+    key="volume_entry",
     name="Volume",
     group="entry",
     order=6,

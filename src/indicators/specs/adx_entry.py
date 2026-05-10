@@ -28,7 +28,7 @@ def short_signal_adx(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
 
 
 register(IndicatorSpec(
-    key="adx",
+    key="adx_entry",
     name="ADX",
     group="entry",
     order=3,
