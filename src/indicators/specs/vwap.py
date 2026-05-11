@@ -14,7 +14,8 @@ TODO: Revisit when intraday session-aware data loading is supported.
 """
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import vwap as _vwap
 
 
@@ -22,6 +23,15 @@ def compute_vwap(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
     if "volume" in df.columns:
         df["vwap"] = _vwap(df["high"], df["low"], df["close"], df["volume"])
     return df
+
+
+def render_vwap(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col) if ctx.is_subplot else {}
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["vwap"], mode="lines",
+        line=dict(color=ctx.palette.purple, width=1.2, dash="dash"),
+        name="VWAP", showlegend=True,
+    ), **rn)
 
 
 register(IndicatorSpec(
@@ -38,4 +48,8 @@ register(IndicatorSpec(
     outputs=["vwap"],
     long_signal=None,
     short_signal=None,
+    plot=PlotSpec(
+        kind="overlay",
+        render=render_vwap,
+    ),
 ))

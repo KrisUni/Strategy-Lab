@@ -5,7 +5,8 @@ but bbwp_exit is enabled, this compute function computes bbwp itself.
 """
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import bbwp, sma
 
 
@@ -22,6 +23,35 @@ def long_signal_bbwp_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series
 
 def short_signal_bbwp_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
     return df["bbwp"] < params["bbwp_exit_threshold_short"]
+
+
+def _bbwp_exit_hlines(ctx: PlotContext) -> None:
+    ctx.fig.add_hline(y=ctx.params.get("bbwp_exit_threshold_long", 80), line_dash="dot",
+        line_color=ctx.palette.exit_hline, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=ctx.params.get("bbwp_exit_threshold_short", 20), line_dash="dot",
+        line_color="rgba(249,115,22,0.7)", row=ctx.row, col=ctx.col)
+
+
+def render_bbwp_exit(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["bbwp"], mode="lines",
+        line=dict(color=ctx.palette.sky, width=1.2),
+        name="BBWP", showlegend=True,
+    ), **rn)
+    if "bbwp_sma" in ctx.idf.columns:
+        ctx.fig.add_trace(go.Scatter(
+            x=ctx.idf.index, y=ctx.idf["bbwp_sma"], mode="lines",
+            line=dict(color=ctx.palette.secondary, width=1),
+            name="BBWP SMA", showlegend=True,
+        ), **rn)
+    _bbwp_exit_hlines(ctx)
+    ctx.fig.update_yaxes(title_text="BBWP", range=[0, 100],
+        title_font=dict(size=8), row=ctx.row, col=ctx.col)
+
+
+def contribute_bbwp_exit(ctx: PlotContext) -> None:
+    _bbwp_exit_hlines(ctx)
 
 
 register(IndicatorSpec(
@@ -43,4 +73,11 @@ register(IndicatorSpec(
     long_signal=long_signal_bbwp_exit,
     short_signal=short_signal_bbwp_exit,
     reuses_outputs_from=["bbwp_entry"],
+    plot=PlotSpec(
+        kind="panel",
+        render=render_bbwp_exit,
+        panel_title="BBWP",
+        panel_y_range=(0, 100),
+        contribute=contribute_bbwp_exit,
+    ),
 ))

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import pandas as pd
 
@@ -57,6 +57,52 @@ class ParamSpec:
 
 
 @dataclass
+class Palette:
+    """Color vocabulary for indicator renders. All render callables pull from here."""
+    primary: str = "#3b82f6"                 # entry-side lines (blue)
+    secondary: str = "#f59e0b"               # exit-side / signal lines (amber)
+    bullish: str = "#10b981"                 # long direction (green)
+    bearish: str = "#ef4444"                 # short direction (red)
+    neutral_grid: str = "rgba(255,255,255,0.2)"
+    ob_line: str = "rgba(239,68,68,0.6)"     # overbought hlines
+    os_line: str = "rgba(16,185,129,0.6)"    # oversold hlines
+    purple: str = "#a855f7"
+    sky: str = "#60a5fa"
+    exit_hline: str = "rgba(245,158,11,0.7)" # exit threshold hlines
+
+
+PALETTE = Palette()
+
+
+@dataclass
+class PlotContext:
+    """Passed to every render/contribute callable."""
+    fig: Any               # go.Figure — plotly not imported in registry
+    row: int               # subplot row (1 = price panel)
+    col: int               # always 1
+    df: pd.DataFrame       # OHLCV
+    idf: pd.DataFrame      # indicator outputs
+    params: Dict[str, Any]
+    palette: Palette
+    is_subplot: bool = True
+
+
+@dataclass
+class PlotSpec:
+    """Declares how an indicator renders itself."""
+    kind: Literal["overlay", "panel"]
+    render: Callable[[PlotContext], None]
+    panel_title: str = ""
+    panel_y_range: Optional[Tuple[float, float]] = None
+    panel_height_weight: float = 1.0
+    owner_for_columns: List[str] = field(default_factory=list)
+    # Contributor hook: called on the owner's panel after owner.render().
+    # Define this to prevent getting a separate row when the owner is enabled.
+    # Every spec with contribute must also have render capable of running standalone.
+    contribute: Optional[Callable[[PlotContext], None]] = None
+
+
+@dataclass
 class IndicatorSpec:
     """One self-contained indicator declaration.
 
@@ -85,6 +131,11 @@ class IndicatorSpec:
         # Used for topological sort (dependency comes first) and dedup
         # (if a dep is enabled, its compute already ran).
         # Example: bbwp_exit reads the "bbwp" column from bbwp_entry.
+
+    plot: Optional[PlotSpec] = None
+        # None = no visual. When set, the chart engine calls plot.render(ctx).
+        # Contributors (plot.contribute defined) don't get their own panel row
+        # when their owner is also enabled — contribute() runs on the owner's row.
 
 
 # ─── Global registry ──────────────────────────────────────────────────────────
@@ -221,3 +272,29 @@ def validate_registry() -> None:
                     f"Indicator '{spec.key}'.{fn_name} is a lambda — "
                     "use a named function for debuggability and picklability"
                 )
+
+    # PlotSpec validation
+    owner_columns: Dict[str, str] = {}   # col → spec_key claiming ownership
+    for spec in INDICATOR_REGISTRY:
+        ps = spec.plot
+        if ps is None:
+            continue
+        if ps.kind == "panel" and not ps.panel_title:
+            raise ValueError(
+                f"Indicator '{spec.key}': PlotSpec kind='panel' requires non-empty panel_title"
+            )
+        if ps.render.__name__.startswith("<lambda>"):
+            raise ValueError(
+                f"Indicator '{spec.key}': plot.render must be a named function, not a lambda"
+            )
+        if ps.contribute is not None and ps.contribute.__name__.startswith("<lambda>"):
+            raise ValueError(
+                f"Indicator '{spec.key}': plot.contribute must be a named function, not a lambda"
+            )
+        for col in ps.owner_for_columns:
+            if col in owner_columns:
+                raise ValueError(
+                    f"Column '{col}' claimed as owner by both "
+                    f"'{owner_columns[col]}' and '{spec.key}'"
+                )
+            owner_columns[col] = spec.key

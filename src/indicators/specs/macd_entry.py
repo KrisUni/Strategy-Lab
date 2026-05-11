@@ -1,7 +1,8 @@
 """MACD momentum entry spec."""
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import macd as _macd
 
 
@@ -32,6 +33,33 @@ def short_signal_macd(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
         return df["macd"] < 0
 
 
+def render_macd(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    hist = ctx.idf["macd_hist"].fillna(0)
+    bar_colors = [
+        f"rgba(16,185,129,0.7)" if v >= 0 else "rgba(239,68,68,0.7)"
+        for v in hist
+    ]
+    ctx.fig.add_trace(go.Bar(
+        x=ctx.idf.index, y=hist, marker_color=bar_colors,
+        name="MACD Hist", showlegend=True,
+    ), **rn)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["macd"], mode="lines",
+        line=dict(color=ctx.palette.sky, width=1.2),
+        name="MACD", showlegend=True,
+    ), **rn)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["macd_signal"], mode="lines",
+        line=dict(color=ctx.palette.secondary, width=1),
+        name="Signal", showlegend=True,
+    ), **rn)
+    ctx.fig.add_hline(y=0, line_color=ctx.palette.neutral_grid,
+        row=ctx.row, col=ctx.col)
+    ctx.fig.update_yaxes(title_text="MACD", title_font=dict(size=8),
+        row=ctx.row, col=ctx.col)
+
+
 register(IndicatorSpec(
     key="macd_entry",
     name="MACD",
@@ -55,4 +83,11 @@ register(IndicatorSpec(
     outputs=["macd", "macd_signal", "macd_hist"],
     long_signal=long_signal_macd,
     short_signal=short_signal_macd,
+    plot=PlotSpec(
+        kind="panel",
+        render=render_macd,
+        panel_title="MACD",
+        panel_height_weight=1.5,
+        owner_for_columns=["macd", "macd_signal", "macd_hist"],
+    ),
 ))

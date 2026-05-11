@@ -25,6 +25,7 @@ from src.indicators import (
     rsi_hidden_divergence,
     rsi as compute_rsi,
 )
+from src.indicators.registry import enabled_specs as _enabled_specs, PlotContext, PALETTE
 from ui.state_migration import migrate_legacy_pamrp_params
 
 
@@ -124,8 +125,43 @@ _RANGE_BUTTONS_SHORT = [
     dict(step='all', label='All'),
 ]
 # ─────────────────────────────────────────────────────────────────────────────
-# Price chart
+# Price chart — registry-driven indicator rendering
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _collect_plot_rows(specs):
+    """
+    Partition enabled specs into:
+    - overlay_specs: rendered on the price panel (row=1)
+    - panel_rows: list of (primary_spec, [contributor_specs])
+
+    Contributor specs (plot.contribute defined) merge into their owner's panel row.
+    If no owner is enabled, the contributor renders standalone as a primary.
+    """
+    overlay_specs = [s for s in specs if s.plot and s.plot.kind == "overlay"]
+    all_panels = [s for s in specs if s.plot and s.plot.kind == "panel"]
+
+    contributor_keys = {s.key for s in all_panels if s.plot.contribute is not None}
+    primary_specs = [s for s in all_panels if s.key not in contributor_keys]
+    contributors = [s for s in all_panels if s.key in contributor_keys]
+
+    enabled_keys = {s.key for s in specs}
+    contrib_map = {s.key: [] for s in primary_specs}
+    orphan_contributors = []
+
+    for c in contributors:
+        placed = False
+        for dep_key in c.reuses_outputs_from:
+            if dep_key in enabled_keys and dep_key in contrib_map:
+                contrib_map[dep_key].append(c)
+                placed = True
+                break
+        if not placed:
+            orphan_contributors.append(c)
+
+    panel_rows = [(s, contrib_map[s.key]) for s in primary_specs]
+    panel_rows += [(c, []) for c in orphan_contributors]
+    return overlay_specs, panel_rows
+
 
 def create_price_chart_with_trades(
     df: pd.DataFrame,
@@ -137,50 +173,31 @@ def create_price_chart_with_trades(
     """
     Price chart with optional trade markers, HPDR overlay, and strategy indicator panels.
 
-    When params and indicator_df are provided, enabled strategy indicators are rendered:
-    - Overlay indicators (MA Trend, Supertrend, VWAP) are drawn on the price panel.
-    - Oscillator indicators (PAMRP, BBWP, RSI, ADX, MACD, Stoch RSI) get sub-panels
-      with a shared x-axis.
+    Indicator rendering is fully registry-driven: each IndicatorSpec's PlotSpec.render()
+    callable owns its own visual identity. Adding new indicators requires no edits here.
 
     Y-axis of the price panel is always locked to the actual price range.
     """
     p = migrate_legacy_pamrp_params(params or {})
     idf = indicator_df
 
-    # ── Decide which indicators to display ───────────────────────────────────
-    overlay_inds: List[str] = []   # drawn on price panel
-    sub_panel_inds: List[str] = [] # each gets its own subplot row
-
+    overlay_specs: list = []
+    panel_rows: list = []
     if idf is not None and p:
-        if p.get('ma_trend_enabled') and 'ma_fast' in idf.columns:
-            overlay_inds.append('ma')
-        if p.get('supertrend_enabled') and 'supertrend' in idf.columns:
-            overlay_inds.append('supertrend')
-        if p.get('vwap_enabled') and 'vwap' in idf.columns:
-            overlay_inds.append('vwap')
-        if (
-            p.get('pamrp_enabled')
-            or p.get('pamrp_exit_enabled')
-        ) and any(col in idf.columns for col in ('pamrp_entry', 'pamrp_exit', 'pamrp')):
-            sub_panel_inds.append('pamrp')
-        if (p.get('bbwp_enabled') or p.get('bbwp_exit_enabled')) and 'bbwp' in idf.columns:
-            sub_panel_inds.append('bbwp')
-        if p.get('rsi_enabled') and 'rsi' in idf.columns:
-            sub_panel_inds.append('rsi')
-        if p.get('adx_enabled') and 'adx' in idf.columns:
-            sub_panel_inds.append('adx')
-        if p.get('macd_enabled') and 'macd' in idf.columns:
-            sub_panel_inds.append('macd')
-        if p.get('stoch_rsi_exit_enabled') and 'stoch_k' in idf.columns:
-            sub_panel_inds.append('stoch')
+        overlay_specs, panel_rows = _collect_plot_rows(_enabled_specs(p))
 
-    n_sub = len(sub_panel_inds)
+    n_sub = len(panel_rows)
     use_subplots = n_sub > 0
-    # ── Build figure (with or without sub-panels) ─────────────────────────────
+
+    # ── Build figure ──────────────────────────────────────────────────────────
     if use_subplots:
+        hw_total = sum(s.plot.panel_height_weight for s, _ in panel_rows) or 1.0
         sub_frac = min(0.45, 0.15 * n_sub)
         price_frac = 1.0 - sub_frac
-        row_heights = [price_frac] + [sub_frac / n_sub] * n_sub
+        row_heights = [price_frac] + [
+            sub_frac * (s.plot.panel_height_weight / hw_total)
+            for s, _ in panel_rows
+        ]
         fig = make_subplots(
             rows=1 + n_sub, cols=1,
             shared_xaxes=True,
@@ -325,157 +342,18 @@ def create_price_chart_with_trades(
                 text=short_exit_h, hoverinfo='text',
                 name='Short Exits', showlegend=True), **r1)
 
-    # ── Overlay indicators on price panel ─────────────────────────────────────
-    if idf is not None:
-        if 'ma' in overlay_inds:
-            ma_type = p.get('ma_type', 'sma').upper()
-            fig.add_trace(go.Scatter(x=idf.index, y=idf['ma_fast'], mode='lines',
-                line=dict(color='#3b82f6', width=1.2),
-                name=f"{ma_type}({p.get('ma_fast_length', 50)})", showlegend=True), **r1)
-            fig.add_trace(go.Scatter(x=idf.index, y=idf['ma_slow'], mode='lines',
-                line=dict(color='#f59e0b', width=1.2),
-                name=f"{ma_type}({p.get('ma_slow_length', 200)})", showlegend=True), **r1)
+    # ── Registry-driven indicator rendering ───────────────────────────────────
+    if idf is not None and p:
+        ctx_kw = dict(df=df, idf=idf, params=p, palette=PALETTE, is_subplot=use_subplots)
 
-        if 'supertrend' in overlay_inds:
-            bull_st = idf['supertrend'].where(idf['st_direction'] > 0)
-            bear_st = idf['supertrend'].where(idf['st_direction'] < 0)
-            fig.add_trace(go.Scatter(x=idf.index, y=bull_st, mode='lines',
-                line=dict(color='#10b981', width=1.5),
-                name='Supertrend ▲', showlegend=True), **r1)
-            fig.add_trace(go.Scatter(x=idf.index, y=bear_st, mode='lines',
-                line=dict(color='#ef4444', width=1.5),
-                name='Supertrend ▼', showlegend=True), **r1)
+        for spec in overlay_specs:
+            spec.plot.render(PlotContext(fig=fig, row=1, col=1, **ctx_kw))
 
-        if 'vwap' in overlay_inds:
-            fig.add_trace(go.Scatter(x=idf.index, y=idf['vwap'], mode='lines',
-                line=dict(color='#a855f7', width=1.2, dash='dash'),
-                name='VWAP', showlegend=True), **r1)
-
-    # ── Oscillator sub-panels ─────────────────────────────────────────────────
-    if idf is not None:
-        for i, panel_name in enumerate(sub_panel_inds):
-            row = i + 2
-            rn = dict(row=row, col=1)
-
-            if panel_name == 'pamrp':
-                show_entry = p.get('pamrp_enabled') and 'pamrp_entry' in idf.columns
-                show_exit = p.get('pamrp_exit_enabled') and 'pamrp_exit' in idf.columns
-                same_config = (
-                    p.get('pamrp_entry_ma_length', 20) == p.get('pamrp_exit_ma_length', 20)
-                    and p.get('pamrp_entry_lookback', 350) == p.get('pamrp_exit_lookback', 350)
-                    and p.get('pamrp_entry_ma_type', 'sma') == p.get('pamrp_exit_ma_type', 'sma')
-                )
-
-                if show_entry:
-                    fig.add_trace(go.Scatter(
-                        x=idf.index, y=idf['pamrp_entry'], mode='lines',
-                        line=dict(color='#60a5fa', width=1.2),
-                        name='PAMRP Entry' if show_exit and not same_config else 'PAMRP',
-                        showlegend=True,
-                    ), **rn)
-                elif 'pamrp' in idf.columns:
-                    fig.add_trace(go.Scatter(
-                        x=idf.index, y=idf['pamrp'], mode='lines',
-                        line=dict(color='#60a5fa', width=1.2),
-                        name='PAMRP', showlegend=True,
-                    ), **rn)
-
-                if show_exit and (not show_entry or not same_config):
-                    fig.add_trace(go.Scatter(
-                        x=idf.index, y=idf['pamrp_exit'], mode='lines',
-                        line=dict(color='#f59e0b', width=1.2, dash='dot'),
-                        name='PAMRP Exit', showlegend=True,
-                    ), **rn)
-
-                if p.get('pamrp_enabled'):
-                    fig.add_hline(y=p.get('pamrp_entry_long', 20), line_dash='dash',
-                        line_color='rgba(16,185,129,0.6)', row=row, col=1)
-                    fig.add_hline(y=p.get('pamrp_entry_short', 80), line_dash='dash',
-                        line_color='rgba(239,68,68,0.6)', row=row, col=1)
-                if p.get('pamrp_exit_enabled'):
-                    fig.add_hline(y=p.get('pamrp_exit_long', 70), line_dash='dot',
-                        line_color='rgba(245,158,11,0.7)', row=row, col=1)
-                    fig.add_hline(y=p.get('pamrp_exit_short', 30), line_dash='dot',
-                        line_color='rgba(249,115,22,0.7)', row=row, col=1)
-                fig.update_yaxes(title_text='PAMRP', range=[0, 100],
-                    title_font=dict(size=8), row=row, col=1)
-
-            elif panel_name == 'bbwp':
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp'], mode='lines',
-                    line=dict(color='#60a5fa', width=1.2),
-                    name='BBWP', showlegend=True), **rn)
-                if 'bbwp_sma' in idf.columns:
-                    fig.add_trace(go.Scatter(x=idf.index, y=idf['bbwp_sma'], mode='lines',
-                        line=dict(color='#f59e0b', width=1),
-                        name='BBWP SMA', showlegend=True), **rn)
-                fig.add_hline(y=p.get('bbwp_threshold_long', 50), line_dash='dash',
-                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
-                fig.add_hline(y=p.get('bbwp_threshold_short', 50), line_dash='dash',
-                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
-                fig.update_yaxes(title_text='BBWP', range=[0, 100],
-                    title_font=dict(size=8), row=row, col=1)
-
-            elif panel_name == 'rsi':
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['rsi'], mode='lines',
-                    line=dict(color='#a855f7', width=1.2),
-                    name=f"RSI({p.get('rsi_length', 14)})", showlegend=True), **rn)
-                fig.add_hline(y=p.get('rsi_oversold', 30), line_dash='dash',
-                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
-                fig.add_hline(y=p.get('rsi_overbought', 70), line_dash='dash',
-                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
-                fig.add_hline(y=50, line_color='rgba(255,255,255,0.15)', row=row, col=1)
-                fig.update_yaxes(title_text='RSI', range=[0, 100],
-                    title_font=dict(size=8), row=row, col=1)
-
-            elif panel_name == 'adx':
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['adx'], mode='lines',
-                    line=dict(color='#f59e0b', width=1.2),
-                    name='ADX', showlegend=True), **rn)
-                if 'di_plus' in idf.columns:
-                    fig.add_trace(go.Scatter(x=idf.index, y=idf['di_plus'], mode='lines',
-                        line=dict(color='#10b981', width=0.8),
-                        name='+DI', showlegend=True), **rn)
-                if 'di_minus' in idf.columns:
-                    fig.add_trace(go.Scatter(x=idf.index, y=idf['di_minus'], mode='lines',
-                        line=dict(color='#ef4444', width=0.8),
-                        name='-DI', showlegend=True), **rn)
-                fig.add_hline(y=p.get('adx_threshold', 20), line_dash='dash',
-                    line_color='rgba(255,255,255,0.3)', row=row, col=1)
-                fig.update_yaxes(title_text='ADX',
-                    title_font=dict(size=8), row=row, col=1)
-
-            elif panel_name == 'macd':
-                hist = idf['macd_hist'].fillna(0)
-                bar_colors = [
-                    'rgba(16,185,129,0.7)' if v >= 0 else 'rgba(239,68,68,0.7)'
-                    for v in hist
-                ]
-                fig.add_trace(go.Bar(x=idf.index, y=hist,
-                    marker_color=bar_colors,
-                    name='MACD Hist', showlegend=True), **rn)
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['macd'], mode='lines',
-                    line=dict(color='#60a5fa', width=1.2),
-                    name='MACD', showlegend=True), **rn)
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['macd_signal'], mode='lines',
-                    line=dict(color='#f59e0b', width=1),
-                    name='Signal', showlegend=True), **rn)
-                fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', row=row, col=1)
-                fig.update_yaxes(title_text='MACD',
-                    title_font=dict(size=8), row=row, col=1)
-
-            elif panel_name == 'stoch':
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_k'], mode='lines',
-                    line=dict(color='#60a5fa', width=1.2),
-                    name='Stoch %K', showlegend=True), **rn)
-                fig.add_trace(go.Scatter(x=idf.index, y=idf['stoch_d'], mode='lines',
-                    line=dict(color='#f59e0b', width=1),
-                    name='Stoch %D', showlegend=True), **rn)
-                fig.add_hline(y=p.get('stoch_rsi_overbought', 80), line_dash='dash',
-                    line_color='rgba(239,68,68,0.6)', row=row, col=1)
-                fig.add_hline(y=p.get('stoch_rsi_oversold', 20), line_dash='dash',
-                    line_color='rgba(16,185,129,0.6)', row=row, col=1)
-                fig.update_yaxes(title_text='Stoch RSI', range=[0, 100],
-                    title_font=dict(size=8), row=row, col=1)
+        for i, (primary, contributors) in enumerate(panel_rows, start=2):
+            ctx = PlotContext(fig=fig, row=i, col=1, **ctx_kw)
+            primary.plot.render(ctx)
+            for c in contributors:
+                c.plot.contribute(ctx)
 
     # ── Y-axis locked to price range — HPDR bands must not expand this ────────
     price_min = float(df['low'].min())
@@ -483,7 +361,7 @@ def create_price_chart_with_trades(
     pad = (price_max - price_min) * 0.05
     y_range = [price_min - pad, price_max + pad]
 
-    show_legend = bands is not None or bool(overlay_inds) or bool(sub_panel_inds) or bool(trades)
+    show_legend = bands is not None or bool(overlay_specs) or bool(panel_rows) or bool(trades)
     total_height = 400 + n_sub * 120
 
     fig.update_layout(

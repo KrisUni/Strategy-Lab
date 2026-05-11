@@ -1,7 +1,8 @@
 """BBWP entry indicator spec."""
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import bbwp, sma
 
 
@@ -31,6 +32,27 @@ def short_signal_bbwp_entry(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Seri
     return mask
 
 
+def render_bbwp(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["bbwp"], mode="lines",
+        line=dict(color=ctx.palette.sky, width=1.2),
+        name="BBWP", showlegend=True,
+    ), **rn)
+    if "bbwp_sma" in ctx.idf.columns:
+        ctx.fig.add_trace(go.Scatter(
+            x=ctx.idf.index, y=ctx.idf["bbwp_sma"], mode="lines",
+            line=dict(color=ctx.palette.secondary, width=1),
+            name="BBWP SMA", showlegend=True,
+        ), **rn)
+    ctx.fig.add_hline(y=ctx.params.get("bbwp_threshold_long", 50), line_dash="dash",
+        line_color=ctx.palette.os_line, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=ctx.params.get("bbwp_threshold_short", 50), line_dash="dash",
+        line_color=ctx.palette.ob_line, row=ctx.row, col=ctx.col)
+    ctx.fig.update_yaxes(title_text="BBWP", range=[0, 100],
+        title_font=dict(size=8), row=ctx.row, col=ctx.col)
+
+
 register(IndicatorSpec(
     key="bbwp_entry",
     name="BBWP",
@@ -58,4 +80,11 @@ register(IndicatorSpec(
     outputs=["bbwp", "bbwp_sma"],
     long_signal=long_signal_bbwp_entry,
     short_signal=short_signal_bbwp_entry,
+    plot=PlotSpec(
+        kind="panel",
+        render=render_bbwp,
+        panel_title="BBWP",
+        panel_y_range=(0, 100),
+        owner_for_columns=["bbwp", "bbwp_sma"],
+    ),
 ))

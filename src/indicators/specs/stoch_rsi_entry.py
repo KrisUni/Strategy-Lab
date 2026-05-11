@@ -1,7 +1,8 @@
 """Stochastic RSI entry spec — enter on oversold/overbought extremes."""
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import stoch_rsi as _stoch_rsi
 
 
@@ -23,6 +24,26 @@ def long_signal_stoch_rsi_entry(df: pd.DataFrame, params: Dict[str, Any]) -> pd.
 
 def short_signal_stoch_rsi_entry(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
     return df["stoch_k"] > params["stoch_rsi_overbought"]
+
+
+def render_stoch(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["stoch_k"], mode="lines",
+        line=dict(color=ctx.palette.sky, width=1.2),
+        name="Stoch %K", showlegend=True,
+    ), **rn)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["stoch_d"], mode="lines",
+        line=dict(color=ctx.palette.secondary, width=1),
+        name="Stoch %D", showlegend=True,
+    ), **rn)
+    ctx.fig.add_hline(y=ctx.params.get("stoch_rsi_overbought", 80), line_dash="dash",
+        line_color=ctx.palette.ob_line, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=ctx.params.get("stoch_rsi_oversold", 20), line_dash="dash",
+        line_color=ctx.palette.os_line, row=ctx.row, col=ctx.col)
+    ctx.fig.update_yaxes(title_text="Stoch RSI", range=[0, 100],
+        title_font=dict(size=8), row=ctx.row, col=ctx.col)
 
 
 register(IndicatorSpec(
@@ -49,4 +70,11 @@ register(IndicatorSpec(
     outputs=["stoch_k", "stoch_d"],
     long_signal=long_signal_stoch_rsi_entry,
     short_signal=short_signal_stoch_rsi_entry,
+    plot=PlotSpec(
+        kind="panel",
+        render=render_stoch,
+        panel_title="Stoch RSI",
+        panel_y_range=(0, 100),
+        owner_for_columns=["stoch_k", "stoch_d"],
+    ),
 ))

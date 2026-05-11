@@ -1,7 +1,8 @@
 """PAMRP entry indicator spec."""
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import pamrp
 
 
@@ -24,6 +25,22 @@ def long_signal_pamrp_entry(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Seri
 
 def short_signal_pamrp_entry(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
     return df["pamrp_entry"] > params["pamrp_entry_short"]
+
+
+def render_pamrp(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    col = "pamrp_entry" if "pamrp_entry" in ctx.idf.columns else "pamrp"
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf[col], mode="lines",
+        line=dict(color=ctx.palette.sky, width=1.2),
+        name="PAMRP", showlegend=True,
+    ), **rn)
+    ctx.fig.add_hline(y=ctx.params.get("pamrp_entry_long", 20), line_dash="dash",
+        line_color=ctx.palette.os_line, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=ctx.params.get("pamrp_entry_short", 80), line_dash="dash",
+        line_color=ctx.palette.ob_line, row=ctx.row, col=ctx.col)
+    ctx.fig.update_yaxes(title_text="PAMRP", range=[0, 100],
+        title_font=dict(size=8), row=ctx.row, col=ctx.col)
 
 
 register(IndicatorSpec(
@@ -51,4 +68,11 @@ register(IndicatorSpec(
     outputs=["pamrp_entry", "pamrp"],
     long_signal=long_signal_pamrp_entry,
     short_signal=short_signal_pamrp_entry,
+    plot=PlotSpec(
+        kind="panel",
+        render=render_pamrp,
+        panel_title="PAMRP",
+        panel_y_range=(0, 100),
+        owner_for_columns=["pamrp_entry", "pamrp"],
+    ),
 ))

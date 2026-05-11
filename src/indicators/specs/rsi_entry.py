@@ -1,7 +1,8 @@
 """RSI mean-reversion entry spec."""
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import rsi as _rsi
 
 
@@ -16,6 +17,22 @@ def long_signal_rsi(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
 
 def short_signal_rsi(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
     return df["rsi"] > params["rsi_overbought"]
+
+
+def render_rsi(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf["rsi"], mode="lines",
+        line=dict(color=ctx.palette.purple, width=1.2),
+        name=f"RSI({ctx.params.get('rsi_length', 14)})", showlegend=True,
+    ), **rn)
+    ctx.fig.add_hline(y=ctx.params.get("rsi_oversold", 30), line_dash="dash",
+        line_color=ctx.palette.os_line, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=ctx.params.get("rsi_overbought", 70), line_dash="dash",
+        line_color=ctx.palette.ob_line, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=50, line_color=ctx.palette.neutral_grid, row=ctx.row, col=ctx.col)
+    ctx.fig.update_yaxes(title_text="RSI", range=[0, 100],
+        title_font=dict(size=8), row=ctx.row, col=ctx.col)
 
 
 register(IndicatorSpec(
@@ -38,4 +55,11 @@ register(IndicatorSpec(
     outputs=["rsi"],
     long_signal=long_signal_rsi,
     short_signal=short_signal_rsi,
+    plot=PlotSpec(
+        kind="panel",
+        render=render_rsi,
+        panel_title="RSI",
+        panel_y_range=(0, 100),
+        owner_for_columns=["rsi"],
+    ),
 ))

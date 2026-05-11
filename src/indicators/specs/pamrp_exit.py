@@ -7,7 +7,8 @@ the pamrp_entry column to avoid redundant computation.
 """
 from typing import Any, Dict
 import pandas as pd
-from ..registry import IndicatorSpec, ParamSpec, register
+from plotly import graph_objects as go
+from ..registry import IndicatorSpec, ParamSpec, PlotSpec, PlotContext, register
 from .. import pamrp
 
 
@@ -44,6 +45,41 @@ def short_signal_pamrp_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Seri
     return df["pamrp_exit"] < params["pamrp_exit_short"]
 
 
+def _pamrp_exit_hlines(ctx: PlotContext) -> None:
+    ctx.fig.add_hline(y=ctx.params.get("pamrp_exit_long", 70), line_dash="dot",
+        line_color=ctx.palette.exit_hline, row=ctx.row, col=ctx.col)
+    ctx.fig.add_hline(y=ctx.params.get("pamrp_exit_short", 30), line_dash="dot",
+        line_color="rgba(249,115,22,0.7)", row=ctx.row, col=ctx.col)
+
+
+def render_pamrp_exit(ctx: PlotContext) -> None:
+    rn = dict(row=ctx.row, col=ctx.col)
+    col = "pamrp_exit" if "pamrp_exit" in ctx.idf.columns else "pamrp"
+    ctx.fig.add_trace(go.Scatter(
+        x=ctx.idf.index, y=ctx.idf[col], mode="lines",
+        line=dict(color=ctx.palette.sky, width=1.2),
+        name="PAMRP Exit", showlegend=True,
+    ), **rn)
+    _pamrp_exit_hlines(ctx)
+    ctx.fig.update_yaxes(title_text="PAMRP", range=[0, 100],
+        title_font=dict(size=8), row=ctx.row, col=ctx.col)
+
+
+def contribute_pamrp_exit(ctx: PlotContext) -> None:
+    same_config = (
+        ctx.params.get("pamrp_exit_ma_length", 20) == ctx.params.get("pamrp_entry_ma_length", 20)
+        and ctx.params.get("pamrp_exit_lookback", 350) == ctx.params.get("pamrp_entry_lookback", 350)
+        and ctx.params.get("pamrp_exit_ma_type", "sma") == ctx.params.get("pamrp_entry_ma_type", "sma")
+    )
+    if not same_config and "pamrp_exit" in ctx.idf.columns:
+        ctx.fig.add_trace(go.Scatter(
+            x=ctx.idf.index, y=ctx.idf["pamrp_exit"], mode="lines",
+            line=dict(color=ctx.palette.secondary, width=1.2, dash="dot"),
+            name="PAMRP Exit", showlegend=True,
+        ), row=ctx.row, col=ctx.col)
+    _pamrp_exit_hlines(ctx)
+
+
 register(IndicatorSpec(
     key="pamrp_exit",
     name="PAMRP Exit",
@@ -70,4 +106,11 @@ register(IndicatorSpec(
     long_signal=long_signal_pamrp_exit,
     short_signal=short_signal_pamrp_exit,
     reuses_outputs_from=["pamrp_entry"],
+    plot=PlotSpec(
+        kind="panel",
+        render=render_pamrp_exit,
+        panel_title="PAMRP",
+        panel_y_range=(0, 100),
+        contribute=contribute_pamrp_exit,
+    ),
 ))
