@@ -28,7 +28,7 @@ BH_WINDOW_OPTIONS = {
 
 def render_backtest_tab() -> None:
     c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-    st.session_state.capital = c1.number_input("Capital $", 1000, 1000000, st.session_state.capital, 1000)
+    st.session_state.capital = c1.number_input("Capital $", 1000, 1000000, st.session_state.capital, 1000, key="exec_capital")
     st.session_state.commission = c2.number_input(
         "Comm / side %",
         min_value=0.0,
@@ -36,6 +36,7 @@ def render_backtest_tab() -> None:
         step=0.01,
         format="%.2f",
         help="Applied on entry and exit. A 0.10% commission becomes 0.20% round-trip.",
+        key="exec_commission",
     )
     st.session_state.slippage = c3.number_input(
         "Slip / fill %",
@@ -44,6 +45,7 @@ def render_backtest_tab() -> None:
         step=0.01,
         format="%.2f",
         help="Applied on entries and non-gap-aware exits. No hard UI cap.",
+        key="exec_slippage",
     )
     with c4:
         st.markdown("<br>", unsafe_allow_html=True)

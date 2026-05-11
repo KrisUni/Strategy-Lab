@@ -12,6 +12,8 @@ import streamlit as st
 from datetime import datetime, timedelta
 
 from src.data import fetch_yfinance, generate_sample_data, load_csv
+from src.persistence import delete_strategy, list_strategies, load_strategy, save_strategy
+from ui.session import get_default_params
 from ui.sidebar_renderer import render_indicator_section
 
 
@@ -42,6 +44,9 @@ def render_sidebar() -> None:
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
         _render_data_section()
+
+        st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+        _render_strategy_persistence()
 
         st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
         st.markdown("### ⚙️ Strategy")
@@ -174,10 +179,10 @@ def _render_data_section() -> None:
 
 def _render_position_sizing(p: dict) -> None:
     with st.expander("💰 Position Sizing", expanded=False):
-        p['position_size_pct'] = st.slider("Position %", 10, 100, int(p['position_size_pct']), 10)
-        p['use_kelly'] = st.toggle("Kelly Criterion", p['use_kelly'])
+        p['position_size_pct'] = st.slider("Position %", 10, 100, int(p['position_size_pct']), 10, key="ps_size_pct")
+        p['use_kelly'] = st.toggle("Kelly Criterion", p['use_kelly'], key="ps_use_kelly")
         if p['use_kelly']:
-            p['kelly_fraction'] = st.slider("Kelly Fraction", 0.1, 1.0, p['kelly_fraction'], 0.1)
+            p['kelly_fraction'] = st.slider("Kelly Fraction", 0.1, 1.0, p['kelly_fraction'], 0.1, key="ps_kelly_frac")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -257,3 +262,133 @@ def _render_exit_indicators(p: dict) -> None:
 
     render_indicator_section("exit", p)
     render_indicator_section("risk", p)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategy persistence
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _do_save_strategy(name: str) -> None:
+    save_strategy(
+        name,
+        dict(st.session_state.params),
+        {
+            "capital": int(st.session_state.capital),
+            "commission": float(st.session_state.commission),
+            "slippage": float(st.session_state.slippage),
+        },
+    )
+    st.toast(f"Saved '{name}'")
+    st.session_state._strat_clear_name = True
+
+
+def _render_strategy_persistence() -> None:
+    st.markdown("### 💾 Strategies")
+
+    saved = list_strategies()
+    names = [s["name"] for s in saved]
+
+    # Clear stale confirmation flags
+    for flag in ("_strat_delete_confirm", "_strat_overwrite_confirm"):
+        val = st.session_state.get(flag)
+        if val is not None and val not in names:
+            st.session_state.pop(flag)
+
+    if names:
+        selected = st.selectbox(
+            "Saved strategies",
+            names,
+            key="strat_select",
+            label_visibility="collapsed",
+        )
+        c1, c2 = st.columns(2)
+
+        if c1.button("Load", use_container_width=True, key="strat_load_btn"):
+            loaded_params, loaded_exec = load_strategy(selected)
+            merged = {**get_default_params(), **loaded_params}
+            st.session_state.params = merged
+            # Sync manually-keyed sidebar widgets
+            st.session_state.tdir = merged.get("trade_direction", "Long Only")
+            st.session_state.ecm = merged.get("entry_conflict_mode", "skip")
+            st.session_state.eop = merged.get("entry_operator", "and")
+            st.session_state.same_bar_exit = bool(merged.get("allow_same_bar_exit", True))
+            st.session_state.same_bar_reversal = bool(merged.get("allow_same_bar_reversal", False))
+            st.session_state.xop = merged.get("exit_operator", "or")
+            # Sync position sizing widget keys
+            st.session_state.ps_size_pct = int(merged.get("position_size_pct", 100))
+            st.session_state.ps_use_kelly = bool(merged.get("use_kelly", False))
+            st.session_state.ps_kelly_frac = float(merged.get("kelly_fraction", 0.5))
+            # Sync visual indicator widget keys
+            st.session_state.hpdr_e = bool(merged.get("hpdr_enabled", False))
+            st.session_state.hpdr_lb = int(merged.get("hpdr_lookback", 252))
+            st.session_state.rdiv_e = bool(merged.get("rsi_div_enabled", False))
+            st.session_state.rdiv_l = int(merged.get("rsi_div_length", 14))
+            st.session_state.rdiv_pl = int(merged.get("rsi_div_pivot_left", 5))
+            st.session_state.rdiv_pr = int(merged.get("rsi_div_pivot_right", 5))
+            # Sync indicator param widget keys (render_param_widget uses f"widget_{name}")
+            for k, v in merged.items():
+                st.session_state[f"widget_{k}"] = v
+            # Sync execution params
+            if loaded_exec:
+                cap = int(loaded_exec.get("capital", st.session_state.capital))
+                com = float(loaded_exec.get("commission", st.session_state.commission))
+                slp = float(loaded_exec.get("slippage", st.session_state.slippage))
+                st.session_state.capital = cap
+                st.session_state.commission = com
+                st.session_state.slippage = slp
+                st.session_state.exec_capital = cap
+                st.session_state.exec_commission = com
+                st.session_state.exec_slippage = slp
+            st.session_state.pop("_strat_delete_confirm", None)
+            st.toast(f"Loaded '{selected}'")
+            st.rerun()
+
+        if c2.button("Delete", use_container_width=True, key="strat_delete_btn"):
+            st.session_state._strat_delete_confirm = selected
+            st.session_state.pop("_strat_overwrite_confirm", None)
+
+        if st.session_state.get("_strat_delete_confirm") == selected:
+            st.warning(f"Delete **{selected}**?")
+            d1, d2 = st.columns(2)
+            if d1.button("Yes, delete", key="strat_delete_yes"):
+                delete_strategy(selected)
+                st.session_state.pop("_strat_delete_confirm", None)
+                st.session_state.pop("strat_select", None)
+                st.toast(f"Deleted '{selected}'")
+                st.rerun()
+            if d2.button("Cancel", key="strat_delete_no"):
+                st.session_state.pop("_strat_delete_confirm", None)
+                st.rerun()
+    else:
+        st.caption("No saved strategies yet.")
+
+    if st.session_state.pop("_strat_clear_name", False):
+        st.session_state.strat_name_input = ""
+    name_input = st.text_input(
+        "Name",
+        key="strat_name_input",
+        placeholder="e.g. PAMRP+BBWP long SPY",
+        label_visibility="collapsed",
+    )
+    if st.button("💾 Save current", use_container_width=True, key="strat_save_btn"):
+        name_clean = name_input.strip()
+        if not name_clean:
+            st.warning("Enter a strategy name first.")
+        elif name_clean in names:
+            st.session_state._strat_overwrite_confirm = name_clean
+            st.session_state.pop("_strat_delete_confirm", None)
+        else:
+            _do_save_strategy(name_clean)
+            st.rerun()
+
+    if st.session_state.get("_strat_overwrite_confirm"):
+        oname = st.session_state._strat_overwrite_confirm
+        st.warning(f"Overwrite **{oname}**?")
+        o1, o2 = st.columns(2)
+        if o1.button("Yes, overwrite", key="strat_overwrite_yes"):
+            _do_save_strategy(oname)
+            st.session_state.pop("_strat_overwrite_confirm", None)
+            st.rerun()
+        if o2.button("Cancel", key="strat_overwrite_no"):
+            st.session_state.pop("_strat_overwrite_confirm", None)
+            st.rerun()
