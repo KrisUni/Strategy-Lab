@@ -19,11 +19,8 @@
 
 ## Why this exists
 
-Most free backtesters quietly lie to you. They fill at the close, ignore slippage on stops, leak future data into indicators, optimize on the whole sample and call it a result, and pick the best out-of-sample fold as if that wasn't itself overfitting.
-
-**Strategy Lab is built around the opposite assumption: the platform's job is to rule out bad strategies, not confirm good ones.** The differentiator is methodology — fill realism, leakage prevention, walk-forward selection that doesn't cheat, and a permutation test that actually destroys signal without breaking bar structure.
-
-If your strategy looks worse here than in your previous tool, it's probably the same strategy. The previous tool was lying.
+Strategy Lab is built for researchers who want to know whether their edge is real. The platform's job is to give you an honest answer — through realistic fills, leakage-free signals, walk-forward selection that doesn't introduce hindsight bias, and a permutation test that destroys signal cleanly while preserving bar structure.
+Honest backtests are harder to fake an edge in. That's the point
 
 ---
 
