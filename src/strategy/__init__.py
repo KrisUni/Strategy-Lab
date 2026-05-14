@@ -66,12 +66,33 @@ _DIRECTION_MAP: Dict[str, TradeDirection] = {
     "both":       TradeDirection.BOTH,
 }
 
+# Provisional exit params. These exist in user state and ui/session.py defaults
+# but are not yet declared in ParamSpecs (Issue A). Issue B moves them into the
+# registry properly; remove this set when that lands.
+_PROVISIONAL_EXIT_PARAMS: set = {
+    "rsi_exit_length",
+    "bbwp_exit_length", "bbwp_exit_lookback", "bbwp_exit_sma_length",
+    "adx_exit_length", "adx_exit_smoothing",
+    "macd_exit_fast", "macd_exit_slow", "macd_exit_signal",
+    "volume_exit_ma_length",
+    "supertrend_exit_period", "supertrend_exit_multiplier",
+    "stoch_rsi_exit_length", "stoch_rsi_exit_k", "stoch_rsi_exit_d",
+    "ma_exit_fast", "ma_exit_slow", "ma_exit_type",
+}
+
 
 class StrategyParams:
     """Dict-backed param container. Attribute-access shim keeps call sites unchanged."""
 
     def __init__(self, **overrides: Any) -> None:
         d: Dict[str, Any] = {**_STRATEGY_LEVEL_DEFAULTS, **build_defaults_from_registry()}
+        # Seed provisional exit defaults from the UI param map (Issue A).
+        # Function-local import avoids a top-level ui → src import cycle.
+        from ui.session import get_default_params  # noqa: PLC0415
+        _ui_defaults = get_default_params()
+        for k in _PROVISIONAL_EXIT_PARAMS:
+            if k in _ui_defaults:
+                d.setdefault(k, _ui_defaults[k])
         d.update(overrides)
         object.__setattr__(self, "_d", d)
 
@@ -105,6 +126,13 @@ class StrategyParams:
         legacy_exit_length = d.pop("pamrp_exit_length", None)
         if legacy_exit_length is not None:
             d.setdefault("pamrp_exit_ma_length", legacy_exit_length)
+        # stoch_rsi_exit migration: seed new exit thresholds from entry thresholds
+        stoch_ob = d.get("stoch_rsi_overbought")
+        stoch_os = d.get("stoch_rsi_oversold")
+        if stoch_ob is not None:
+            d.setdefault("stoch_rsi_exit_overbought", stoch_ob)
+        if stoch_os is not None:
+            d.setdefault("stoch_rsi_exit_oversold", stoch_os)
         # UI migration: time_exit_bars (single) → long/short split
         legacy_bars = d.pop("time_exit_bars", None)
         if legacy_bars is not None:
@@ -123,8 +151,14 @@ class StrategyParams:
         ecm = d.get("entry_conflict_mode")
         if isinstance(ecm, str):
             d["entry_conflict_mode"] = EntryConflictMode(ecm.lower())
+        # Issue A: seed independent-exit compute params from entry params.
+        # Function-local import avoids a top-level ui → src import cycle.
+        from ui.state_migration import _ENTRY_TO_EXIT_PARAM_MAPPINGS  # noqa: PLC0415
+        for entry_key, exit_key in _ENTRY_TO_EXIT_PARAM_MAPPINGS:
+            if exit_key not in d and entry_key in d:
+                d[exit_key] = d[entry_key]
         # Filter to known keys only
-        known = set(_STRATEGY_LEVEL_DEFAULTS) | set(build_defaults_from_registry())
+        known = set(_STRATEGY_LEVEL_DEFAULTS) | set(build_defaults_from_registry()) | _PROVISIONAL_EXIT_PARAMS
         return cls(**{k: v for k, v in d.items() if k in known})
 
 

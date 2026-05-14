@@ -3,5 +3,7 @@
   "pamrp_bbwp_long_qqq": "1dd15a932eb24350b64a7612d41f02655a1d93aaaf404379c1025989812cb144",
   "rsi_both_eth_trailing": "63756e8f5b0a633cc855e72be4b91b93f6bbf2646bb0a4b4d9d7689bc08cd168",
   "adx_matrend_long_aapl_timeexit": "b6cafb7da588b9af91f41a70e707560d04c30d0bc2f903c2f5d83b04f686543b",
-  "macd_volume_both_tsla_pamrpexit": "633e9ccd4aacff0c72728451117cee20774819cc5cba03d123bbafd008ec8866"
+  "macd_volume_both_tsla_pamrpexit": "633e9ccd4aacff0c72728451117cee20774819cc5cba03d123bbafd008ec8866",
+  "ma_trend_with_ma_exit_long_aapl": "65bc25d099a009ac7093d9744f13a4c94c9c6a7b8f9c1d384466f2fd38c810aa",
+  "stoch_rsi_meanrevert_with_asym_exit_spy": "fb90d5775326908f26d093e9d95f512c309e1906a9d495a13441ef3e0efff389"
 }

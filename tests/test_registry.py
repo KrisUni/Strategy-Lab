@@ -13,13 +13,14 @@ These tests verify that:
 import numpy as np
 import pandas as pd
 import pytest
-from src.strategy import StrategyParams, SignalGenerator, TradeDirection
+from src.strategy import StrategyParams, SignalGenerator, TradeDirection, _PROVISIONAL_EXIT_PARAMS
 from src.indicators.registry import (
     INDICATOR_REGISTRY,
     STRATEGY_LEVEL_PARAMS,
     all_specs,
     build_defaults_from_registry,
     enabled_specs,
+    get,
     topological_sort,
     validate_registry,
 )
@@ -92,7 +93,7 @@ def test_categorical_params_have_choices():
 def test_all_legacy_params_present_in_registry():
     """Every indicator param in StrategyParams defaults is covered by the registry."""
     sp_defaults = set(StrategyParams().to_dict().keys())
-    indicator_fields = sp_defaults - STRATEGY_LEVEL_PARAMS
+    indicator_fields = sp_defaults - STRATEGY_LEVEL_PARAMS - _PROVISIONAL_EXIT_PARAMS
     registry_params = set(build_defaults_from_registry().keys())
     missing = indicator_fields - registry_params
     assert not missing, (
@@ -104,7 +105,8 @@ def test_all_legacy_params_present_in_registry():
 def test_registry_defaults_match_strategyparams_defaults():
     """Registry default for each param must equal the StrategyParams default."""
     sp = StrategyParams()
-    defaults_sp = {k: v for k, v in sp.to_dict().items() if k not in STRATEGY_LEVEL_PARAMS}
+    defaults_sp = {k: v for k, v in sp.to_dict().items()
+                   if k not in STRATEGY_LEVEL_PARAMS and k not in _PROVISIONAL_EXIT_PARAMS}
     defaults_reg = build_defaults_from_registry()
 
     mismatches = {}
@@ -233,7 +235,6 @@ def test_calculate_indicators_all_enabled_has_expected_columns(sample_df):
         "vwap",
         "macd", "macd_signal", "macd_hist",
         "atr",
-        "exit_ma_fast", "exit_ma_slow",
     }
     missing = expected - set(result.columns)
     assert not missing, f"Missing columns: {missing}"
@@ -330,3 +331,69 @@ def test_strategyparams_time_exit_bars_migration():
     p = StrategyParams.from_dict({"time_exit_bars": 15})
     assert p.time_exit_bars_long == 15
     assert p.time_exit_bars_short == 15
+
+
+def test_ma_exit_reuses_ma_trend_outputs():
+    """ma_exit must not define its own fast/slow length params after refactor."""
+    spec = get("ma_exit")
+    param_names = {p.name for p in spec.params}
+    assert "ma_exit_fast" not in param_names
+    assert "ma_exit_slow" not in param_names
+    assert spec.reuses_outputs_from == ["ma_trend"]
+
+
+def test_stoch_rsi_exit_has_independent_thresholds():
+    """stoch_rsi_exit must expose its own overbought/oversold params after refactor."""
+    spec = get("stoch_rsi_exit")
+    param_names = {p.name for p in spec.params}
+    assert "stoch_rsi_exit_overbought" in param_names
+    assert "stoch_rsi_exit_oversold" in param_names
+    assert spec.reuses_outputs_from == ["stoch_rsi_entry"]
+
+
+def test_ma_exit_topological_order():
+    sorted_specs = topological_sort(all_specs())
+    key_order = {s.key: i for i, s in enumerate(sorted_specs)}
+    assert key_order["ma_trend"] < key_order["ma_exit"]
+
+
+def test_strategyparams_from_dict_does_not_drop_ma_exit_lengths():
+    """Forward-fix: ma_exit_fast and ma_exit_slow are valid params again (Issue A)."""
+    p = StrategyParams.from_dict({"ma_exit_fast": 5, "ma_exit_slow": 15, "ma_exit_enabled": True})
+    d = p.to_dict()
+    assert d["ma_exit_fast"] == 5
+    assert d["ma_exit_slow"] == 15
+    assert d["ma_exit_enabled"] is True
+
+
+def test_strategyparams_stoch_rsi_exit_seeded_from_entry():
+    """from_dict: stoch_rsi_exit thresholds seeded from entry values when absent."""
+    p = StrategyParams.from_dict({"stoch_rsi_overbought": 75, "stoch_rsi_oversold": 25})
+    assert p.stoch_rsi_exit_overbought == 75
+    assert p.stoch_rsi_exit_oversold == 25
+
+
+def test_strategyparams_stoch_rsi_exit_not_overwritten():
+    """from_dict: explicit exit thresholds are not overwritten by entry values."""
+    p = StrategyParams.from_dict({
+        "stoch_rsi_overbought": 75,
+        "stoch_rsi_oversold": 25,
+        "stoch_rsi_exit_overbought": 60,
+        "stoch_rsi_exit_oversold": 40,
+    })
+    assert p.stoch_rsi_exit_overbought == 60
+    assert p.stoch_rsi_exit_oversold == 40
+
+
+def test_strategyparams_round_trips_provisional_exit_params():
+    """Provisional exit params survive StrategyParams.from_dict() → to_dict()."""
+    p = StrategyParams.from_dict({
+        "rsi_length": 21,
+        "rsi_exit_length": 7,
+        "bbwp_length": 8,
+    })
+    d = p.to_dict()
+    assert d["rsi_length"] == 21
+    assert d["rsi_exit_length"] == 7        # not overwritten by seeding
+    assert d["bbwp_length"] == 8
+    assert d["bbwp_exit_length"] == 8       # seeded from entry
