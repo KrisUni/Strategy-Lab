@@ -400,6 +400,7 @@ class BacktestEngine:
         # Mark-to-market and realized equity
         mtm_equity = np.empty(len(df))
         realized_equity = np.empty(len(df))
+        in_position_arr = np.zeros(len(df), dtype=bool)
 
         mtm_equity[0] = self.initial_capital
         realized_equity[0] = self.initial_capital
@@ -416,6 +417,7 @@ class BacktestEngine:
             if position is not None:
                 bars_in_trade += 1
                 bars_in_market += 1
+                in_position_arr[i] = True
                 entry_price = position.entry_price
 
                 # Track extremes for trailing stops and MAE/MFE
@@ -644,13 +646,14 @@ class BacktestEngine:
 
         return self._calculate_metrics(
             trades, eq_curve, real_curve,
-            bars_per_year, bars_in_market, len(df)
+            bars_per_year, bars_in_market, len(df), in_position_arr
         )
 
     def _calculate_metrics(
         self, trades: List[Trade],
         equity_curve: pd.Series, realized_equity: pd.Series,
-        bars_per_year: int, bars_in_market: int, total_bars: int
+        bars_per_year: int, bars_in_market: int, total_bars: int,
+        in_position_arr: np.ndarray
     ) -> BacktestResults:
         """Calculate all performance metrics."""
         num_trades = len(trades)
@@ -736,9 +739,10 @@ class BacktestEngine:
         #
         # active_bars_per_year = n_active * (bars_per_year / n_total)
         # ─────────────────────────────────────────────────────────────
-        returns = equity_curve.pct_change().dropna()
-        active_returns = returns[returns != 0]
-        n_total_rets = len(returns)
+        returns = equity_curve.pct_change()
+        active_mask = pd.Series(in_position_arr, index=equity_curve.index) & returns.notna()
+        active_returns = returns[active_mask]
+        n_total_rets = int(returns.notna().sum())
         n_active = len(active_returns)
 
         # Annualization factor based on active bar frequency

@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.data import generate_sample_data
 from src.indicators import pamrp, bbwp, rsi, macd, supertrend, atr, sma, ema
 from src.strategy import StrategyParams, SignalGenerator, TradeDirection, ConditionOperator, EntryConflictMode
-from src.backtest import BacktestEngine
+from src.backtest import BacktestEngine, Trade
 
 
 class TestIndicators:
@@ -557,6 +557,85 @@ class TestDataModule:
         df2 = generate_sample_data(days=50, seed=456)
         
         assert not df1['close'].equals(df2['close'])
+
+
+class TestActiveSharpeExplicitMask:
+    """_calculate_metrics must use in_position_arr, not returns != 0."""
+
+    @staticmethod
+    def _dummy_trade():
+        return Trade(
+            entry_idx=1,
+            entry_date=pd.Timestamp("2024-01-02"),
+            entry_price=100.0,
+            direction='long',
+            size_dollars=10000.0,
+            exit_idx=3,
+            exit_date=pd.Timestamp("2024-01-04"),
+            exit_price=102.0,
+            exit_reason='signal',
+            pnl=200.0,
+            pnl_pct=2.0,
+            bars_held=2,
+        )
+
+    def _engine(self):
+        return BacktestEngine(StrategyParams())
+
+    def _call_metrics(self, equity_values, in_pos_values, bars_in_market=None):
+        idx = pd.date_range("2024-01-01", periods=len(equity_values), freq="D")
+        equity = pd.Series(equity_values, index=idx)
+        in_pos = np.array(in_pos_values, dtype=bool)
+        bim = bars_in_market if bars_in_market is not None else int(np.sum(in_pos))
+        return self._engine()._calculate_metrics(
+            trades=[self._dummy_trade()],
+            equity_curve=equity,
+            realized_equity=equity,
+            bars_per_year=252,
+            bars_in_market=bim,
+            total_bars=len(equity_values),
+            in_position_arr=in_pos,
+        )
+
+    def test_doji_bar_during_hold_is_counted(self):
+        """Zero-return bar during a held position must be included in active_returns."""
+        # bar 2 is a doji (close unchanged); old logic would drop it, new must keep it
+        equity = [10000.0, 10100.0, 10100.0, 10200.0, 10200.0]
+        in_pos = [False, True, True, True, False]
+
+        results = self._call_metrics(equity, in_pos)
+
+        idx = pd.date_range("2024-01-01", periods=5, freq="D")
+        eq = pd.Series(equity, index=idx)
+        returns = eq.pct_change()
+        active = returns[pd.Series(in_pos, index=idx) & returns.notna()]
+        assert len(active) == 3  # bars 1, 2, 3 — doji included
+
+        if active.std() > 0:
+            expected = (active.mean() / active.std()) * np.sqrt(3 * (252 / 4))
+            assert abs(results.sharpe_ratio - expected) < 1e-9
+        else:
+            assert results.sharpe_ratio == 0.0
+
+    def test_flat_period_excluded_from_active_returns(self):
+        """Bars with no position must not contribute to active Sharpe."""
+        # bars 1-2 in position; bars 3-4 flat but equity drifts upward
+        equity = [10000.0, 10100.0, 10200.0, 10300.0, 10400.0, 10500.0]
+        in_pos = [False, True, True, False, False, False]
+
+        results = self._call_metrics(equity, in_pos, bars_in_market=2)
+
+        idx = pd.date_range("2024-01-01", periods=6, freq="D")
+        eq = pd.Series(equity, index=idx)
+        returns = eq.pct_change()
+        active = returns[pd.Series(in_pos, index=idx) & returns.notna()]
+        assert len(active) == 2
+
+        n_total = int(returns.notna().sum())
+        if len(active) > 1 and active.std() > 0:
+            abpy = 2 * (252 / n_total)
+            expected = (active.mean() / active.std()) * np.sqrt(abpy)
+            assert abs(results.sharpe_ratio - expected) < 1e-9
 
 
 if __name__ == '__main__':
