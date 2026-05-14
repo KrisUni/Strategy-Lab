@@ -1,4 +1,9 @@
-"""ADX exit spec — exit when trend strength fades below threshold."""
+"""ADX exit spec — exit when trend strength fades below threshold.
+
+Self-contained — owns its own computation params (length, smoothing) and
+decision params (threshold). Opportunistically reuses the entry's 'adx'
+column when params match. Writes to its own column 'adx_exit'.
+"""
 from typing import Any, Dict
 import pandas as pd
 from plotly import graph_objects as go
@@ -7,20 +12,28 @@ from .. import adx as _adx
 
 
 def compute_adx_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    if "adx" not in df.columns:
-        df["di_plus"], df["di_minus"], df["adx"] = _adx(
+    entry_reusable = (
+        params.get("adx_enabled", False)
+        and params["adx_exit_length"]    == params["adx_length"]
+        and params["adx_exit_smoothing"] == params["adx_smoothing"]
+        and "adx" in df.columns
+    )
+    if entry_reusable:
+        df["adx_exit"] = df["adx"]
+    else:
+        _, _, df["adx_exit"] = _adx(
             df["high"], df["low"], df["close"],
-            params["adx_length"], params["adx_smoothing"],
+            params["adx_exit_length"], params["adx_exit_smoothing"],
         )
     return df
 
 
 def long_signal_adx_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
-    return df["adx"] < params["adx_exit_threshold"]
+    return df["adx_exit"] < params["adx_exit_threshold"]
 
 
 def short_signal_adx_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
-    return df["adx"] < params["adx_exit_threshold"]
+    return df["adx_exit"] < params["adx_exit_threshold"]
 
 
 def _adx_exit_hline(ctx: PlotContext) -> None:
@@ -31,22 +44,10 @@ def _adx_exit_hline(ctx: PlotContext) -> None:
 def render_adx_exit(ctx: PlotContext) -> None:
     rn = dict(row=ctx.row, col=ctx.col)
     ctx.fig.add_trace(go.Scatter(
-        x=ctx.idf.index, y=ctx.idf["adx"], mode="lines",
+        x=ctx.idf.index, y=ctx.idf["adx_exit"], mode="lines",
         line=dict(color=ctx.palette.secondary, width=1.2),
-        name="ADX", showlegend=True,
+        name="ADX Exit", showlegend=True,
     ), **rn)
-    if "di_plus" in ctx.idf.columns:
-        ctx.fig.add_trace(go.Scatter(
-            x=ctx.idf.index, y=ctx.idf["di_plus"], mode="lines",
-            line=dict(color=ctx.palette.bullish, width=0.8),
-            name="+DI", showlegend=True,
-        ), **rn)
-    if "di_minus" in ctx.idf.columns:
-        ctx.fig.add_trace(go.Scatter(
-            x=ctx.idf.index, y=ctx.idf["di_minus"], mode="lines",
-            line=dict(color=ctx.palette.bearish, width=0.8),
-            name="-DI", showlegend=True,
-        ), **rn)
     _adx_exit_hline(ctx)
     ctx.fig.update_yaxes(title_text="ADX", title_font=dict(size=8),
         row=ctx.row, col=ctx.col)
@@ -65,11 +66,15 @@ register(IndicatorSpec(
     params=[
         ParamSpec("adx_exit_enabled", "bool", False, optimize=False,
                   label="ADX exit enabled", order=0),
+        ParamSpec("adx_exit_length", "int", 14, min=1, max=50,
+                  label="Length", order=1),
+        ParamSpec("adx_exit_smoothing", "int", 14, min=1, max=50,
+                  label="Smoothing", order=2),
         ParamSpec("adx_exit_threshold", "int", 20, min=1, max=99,
-                  label="Exit threshold", order=1),
+                  label="Exit threshold", order=3),
     ],
     compute=compute_adx_exit,
-    outputs=[],
+    outputs=["adx_exit"],
     long_signal=long_signal_adx_exit,
     short_signal=short_signal_adx_exit,
     reuses_outputs_from=["adx_entry"],

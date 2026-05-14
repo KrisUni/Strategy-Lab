@@ -26,6 +26,7 @@ from ..indicators.registry import (
     enabled_specs, topological_sort, build_defaults_from_registry,
 )
 from ..indicators import specs as _indicator_specs  # noqa: F401 — triggers registration
+from ui.state_migration import _ENTRY_TO_EXIT_PARAM_MAPPINGS
 
 
 class TradeDirection(Enum):
@@ -67,6 +68,7 @@ _DIRECTION_MAP: Dict[str, TradeDirection] = {
 }
 
 
+
 class StrategyParams:
     """Dict-backed param container. Attribute-access shim keeps call sites unchanged."""
 
@@ -105,6 +107,13 @@ class StrategyParams:
         legacy_exit_length = d.pop("pamrp_exit_length", None)
         if legacy_exit_length is not None:
             d.setdefault("pamrp_exit_ma_length", legacy_exit_length)
+        # stoch_rsi_exit migration: seed new exit thresholds from entry thresholds
+        stoch_ob = d.get("stoch_rsi_overbought")
+        stoch_os = d.get("stoch_rsi_oversold")
+        if stoch_ob is not None:
+            d.setdefault("stoch_rsi_exit_overbought", stoch_ob)
+        if stoch_os is not None:
+            d.setdefault("stoch_rsi_exit_oversold", stoch_os)
         # UI migration: time_exit_bars (single) → long/short split
         legacy_bars = d.pop("time_exit_bars", None)
         if legacy_bars is not None:
@@ -123,6 +132,10 @@ class StrategyParams:
         ecm = d.get("entry_conflict_mode")
         if isinstance(ecm, str):
             d["entry_conflict_mode"] = EntryConflictMode(ecm.lower())
+        # Seed exit compute params from entry params when exit keys are absent.
+        for entry_key, exit_key in _ENTRY_TO_EXIT_PARAM_MAPPINGS:
+            if exit_key not in d and entry_key in d:
+                d[exit_key] = d[entry_key]
         # Filter to known keys only
         known = set(_STRATEGY_LEVEL_DEFAULTS) | set(build_defaults_from_registry())
         return cls(**{k: v for k, v in d.items() if k in known})

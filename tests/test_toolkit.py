@@ -239,7 +239,7 @@ class TestStrategy:
         idx = pd.RangeIndex(3)
         df = pd.DataFrame({
             'pamrp_exit': [75, 60, 85],
-            'bbwp': [70, 85, 90],
+            'bbwp_exit': [70, 85, 90],
         }, index=idx)
         params = StrategyParams(
             pamrp_exit_enabled=True,
@@ -259,7 +259,7 @@ class TestStrategy:
         idx = pd.RangeIndex(3)
         df = pd.DataFrame({
             'pamrp_exit': [75, 60, 85],
-            'bbwp': [70, 85, 90],
+            'bbwp_exit': [70, 85, 90],
         }, index=idx)
         params = StrategyParams(
             pamrp_exit_enabled=True,

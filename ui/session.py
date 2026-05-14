@@ -12,7 +12,15 @@ import streamlit as st
 from typing import Any, Dict
 
 from src.backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
-from ui.state_migration import migrate_legacy_pamrp_params, migrate_legacy_pamrp_pins
+from ui.state_migration import (
+    migrate_legacy_pamrp_params,
+    migrate_legacy_pamrp_pins,
+    migrate_legacy_ma_exit_params,
+    migrate_legacy_ma_exit_pins,
+    migrate_legacy_stoch_rsi_exit_params,
+    migrate_exit_params_from_entry_defaults,
+    migrate_exit_pins_from_entry_pins,
+)
 
 
 def get_default_params() -> Dict[str, Any]:
@@ -45,14 +53,24 @@ def get_default_params() -> Dict[str, Any]:
         'pamrp_exit_enabled': False,
         'stoch_rsi_entry_enabled': False, 'stoch_rsi_exit_enabled': False, 'stoch_rsi_length': 14, 'stoch_rsi_k': 3, 'stoch_rsi_d': 3,
         'stoch_rsi_overbought': 80, 'stoch_rsi_oversold': 20,
+        'stoch_rsi_exit_overbought': 80, 'stoch_rsi_exit_oversold': 20,
         'time_exit_enabled': False, 'time_exit_bars_long': 20, 'time_exit_bars_short': 20,
-        'ma_exit_enabled': False, 'ma_exit_fast': 10, 'ma_exit_slow': 20,
+        'ma_exit_enabled': False,
         'bbwp_exit_enabled': False, 'bbwp_exit_threshold_long': 80, 'bbwp_exit_threshold_short': 20,
         'adx_exit_enabled': False, 'adx_exit_threshold': 20,
         'macd_exit_enabled': False, 'macd_exit_mode': 'histogram',
         'rsi_exit_enabled': False, 'rsi_exit_long': 50, 'rsi_exit_short': 50,
         'supertrend_exit_enabled': False,
         'volume_exit_enabled': False, 'volume_exit_multiplier': 1.0,
+        # New exit-specific computation and decision params (Issue A)
+        'rsi_exit_length': 14,
+        'bbwp_exit_length': 13, 'bbwp_exit_lookback': 252, 'bbwp_exit_sma_length': 5,
+        'adx_exit_length': 14, 'adx_exit_smoothing': 14,
+        'macd_exit_fast': 12, 'macd_exit_slow': 26, 'macd_exit_signal': 9,
+        'volume_exit_ma_length': 20,
+        'supertrend_exit_period': 10, 'supertrend_exit_multiplier': 3.0,
+        'stoch_rsi_exit_length': 14, 'stoch_rsi_exit_k': 3, 'stoch_rsi_exit_d': 3,
+        'ma_exit_fast': 10, 'ma_exit_slow': 20, 'ma_exit_type': 'ema',
         # ── Visual indicators (display-only, not strategy filters) ────────────
         'hpdr_enabled': False,
         'hpdr_lookback': 252,
@@ -84,9 +102,14 @@ def init_session_state() -> None:
             st.session_state[key] = default
 
     st.session_state.params = migrate_legacy_pamrp_params(st.session_state.params)
+    st.session_state.params = migrate_legacy_ma_exit_params(st.session_state.params)        # now a no-op, harmless
+    st.session_state.params = migrate_legacy_stoch_rsi_exit_params(st.session_state.params)
+    st.session_state.params = migrate_exit_params_from_entry_defaults(st.session_state.params)
     st.session_state.pinned_params = migrate_legacy_pamrp_pins(
         st.session_state.get('pinned_params', set())
     )
+    st.session_state.pinned_params = migrate_legacy_ma_exit_pins(st.session_state.pinned_params)  # now a no-op
+    st.session_state.pinned_params = migrate_exit_pins_from_entry_pins(st.session_state.pinned_params)
 
     # Forward-fill any new keys missing from an older session state
     for k, v in get_default_params().items():

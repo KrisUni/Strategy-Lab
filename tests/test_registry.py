@@ -20,6 +20,7 @@ from src.indicators.registry import (
     all_specs,
     build_defaults_from_registry,
     enabled_specs,
+    get,
     topological_sort,
     validate_registry,
 )
@@ -214,26 +215,39 @@ def test_calculate_indicators_all_enabled_has_expected_columns(sample_df):
     p = StrategyParams(
         pamrp_enabled=True, pamrp_exit_enabled=True,
         bbwp_enabled=True, bbwp_exit_enabled=True,
-        adx_enabled=True, ma_trend_enabled=True,
-        rsi_enabled=True, stoch_rsi_exit_enabled=True,
-        volume_enabled=True, supertrend_enabled=True,
-        vwap_enabled=True, macd_enabled=True,
-        atr_trailing_enabled=True, ma_exit_enabled=True,
+        adx_enabled=True, adx_exit_enabled=True,
+        ma_trend_enabled=True, ma_exit_enabled=True,
+        rsi_enabled=True, rsi_exit_enabled=True,
+        stoch_rsi_entry_enabled=True, stoch_rsi_exit_enabled=True,
+        volume_enabled=True, volume_exit_enabled=True,
+        supertrend_enabled=True, supertrend_exit_enabled=True,
+        vwap_enabled=True,
+        macd_enabled=True, macd_exit_enabled=True,
+        atr_trailing_enabled=True,
     )
     result = SignalGenerator(p).calculate_indicators(sample_df)
     expected = {
+        # entry outputs
         "pamrp_entry", "pamrp_exit", "pamrp",
         "bbwp", "bbwp_sma",
         "adx", "di_plus", "di_minus",
         "ma_fast", "ma_slow",
-            "rsi",
+        "rsi",
         "stoch_k", "stoch_d",
         "volume_ma",
         "supertrend", "st_direction",
         "vwap",
         "macd", "macd_signal", "macd_hist",
         "atr",
-        "exit_ma_fast", "exit_ma_slow",
+        # new exit outputs
+        "bbwp_exit",
+        "adx_exit",
+        "macd_exit_line", "macd_exit_signal_line", "macd_exit_hist",
+        "rsi_exit",
+        "stoch_k_exit", "stoch_d_exit",
+        "volume_ma_exit",
+        "supertrend_exit_line", "supertrend_exit_dir",
+        "ma_fast_exit", "ma_slow_exit",
     }
     missing = expected - set(result.columns)
     assert not missing, f"Missing columns: {missing}"
@@ -330,3 +344,170 @@ def test_strategyparams_time_exit_bars_migration():
     p = StrategyParams.from_dict({"time_exit_bars": 15})
     assert p.time_exit_bars_long == 15
     assert p.time_exit_bars_short == 15
+
+
+def test_ma_exit_owns_independent_params():
+    """ma_exit owns its own fast/slow/type params (Issue B refactor)."""
+    spec = get("ma_exit")
+    param_names = {p.name for p in spec.params}
+    assert "ma_exit_fast" in param_names
+    assert "ma_exit_slow" in param_names
+    assert "ma_exit_type" in param_names
+    assert spec.reuses_outputs_from == ["ma_trend"]
+
+
+def test_stoch_rsi_exit_has_independent_thresholds():
+    """stoch_rsi_exit must expose its own overbought/oversold params after refactor."""
+    spec = get("stoch_rsi_exit")
+    param_names = {p.name for p in spec.params}
+    assert "stoch_rsi_exit_overbought" in param_names
+    assert "stoch_rsi_exit_oversold" in param_names
+    assert spec.reuses_outputs_from == ["stoch_rsi_entry"]
+
+
+def test_ma_exit_topological_order():
+    sorted_specs = topological_sort(all_specs())
+    key_order = {s.key: i for i, s in enumerate(sorted_specs)}
+    assert key_order["ma_trend"] < key_order["ma_exit"]
+
+
+def test_strategyparams_from_dict_does_not_drop_ma_exit_lengths():
+    """Forward-fix: ma_exit_fast and ma_exit_slow are valid params again (Issue A)."""
+    p = StrategyParams.from_dict({"ma_exit_fast": 5, "ma_exit_slow": 15, "ma_exit_enabled": True})
+    d = p.to_dict()
+    assert d["ma_exit_fast"] == 5
+    assert d["ma_exit_slow"] == 15
+    assert d["ma_exit_enabled"] is True
+
+
+def test_strategyparams_stoch_rsi_exit_seeded_from_entry():
+    """from_dict: stoch_rsi_exit thresholds seeded from entry values when absent."""
+    p = StrategyParams.from_dict({"stoch_rsi_overbought": 75, "stoch_rsi_oversold": 25})
+    assert p.stoch_rsi_exit_overbought == 75
+    assert p.stoch_rsi_exit_oversold == 25
+
+
+def test_strategyparams_stoch_rsi_exit_not_overwritten():
+    """from_dict: explicit exit thresholds are not overwritten by entry values."""
+    p = StrategyParams.from_dict({
+        "stoch_rsi_overbought": 75,
+        "stoch_rsi_oversold": 25,
+        "stoch_rsi_exit_overbought": 60,
+        "stoch_rsi_exit_oversold": 40,
+    })
+    assert p.stoch_rsi_exit_overbought == 60
+    assert p.stoch_rsi_exit_oversold == 40
+
+
+def test_strategyparams_round_trips_exit_params():
+    """Exit params survive StrategyParams.from_dict() → to_dict() (now in registry)."""
+    p = StrategyParams.from_dict({
+        "rsi_length": 21,
+        "rsi_exit_length": 7,
+        "bbwp_length": 8,
+    })
+    d = p.to_dict()
+    assert d["rsi_length"] == 21
+    assert d["rsi_exit_length"] == 7        # not overwritten by seeding
+    assert d["bbwp_length"] == 8
+    assert d["bbwp_exit_length"] == 8       # seeded from entry
+
+
+# ─── Independence / opportunistic-reuse tests ─────────────────────────────────
+
+def test_rsi_entry_and_exit_params_are_independent(sample_df):
+    params = StrategyParams(
+        rsi_enabled=True, rsi_length=14,
+        rsi_exit_enabled=True, rsi_exit_length=7,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["rsi"] - result["rsi_exit"]).abs().dropna()
+    assert not diff.empty
+    assert (diff > 1e-9).any()
+
+
+def test_rsi_entry_and_exit_share_computation_when_params_match(sample_df):
+    params = StrategyParams(
+        rsi_enabled=True, rsi_length=14,
+        rsi_exit_enabled=True, rsi_exit_length=14,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["rsi"] - result["rsi_exit"]).abs().dropna()
+    assert (diff < 1e-12).all()
+
+
+def test_bbwp_entry_and_exit_params_are_independent(sample_df):
+    params = StrategyParams(
+        bbwp_enabled=True, bbwp_length=13, bbwp_lookback=252,
+        bbwp_exit_enabled=True, bbwp_exit_length=5, bbwp_exit_lookback=100,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["bbwp"] - result["bbwp_exit"]).abs().dropna()
+    assert not diff.empty
+    assert (diff > 1e-9).any()
+
+
+def test_bbwp_entry_and_exit_share_computation_when_params_match(sample_df):
+    params = StrategyParams(
+        bbwp_enabled=True, bbwp_length=13, bbwp_lookback=252, bbwp_sma_length=5,
+        bbwp_exit_enabled=True,
+        bbwp_exit_length=13, bbwp_exit_lookback=252, bbwp_exit_sma_length=5,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["bbwp"] - result["bbwp_exit"]).abs().dropna()
+    assert (diff < 1e-12).all()
+
+
+def test_macd_entry_and_exit_params_are_independent(sample_df):
+    params = StrategyParams(
+        macd_enabled=True, macd_fast=12, macd_slow=26, macd_signal=9,
+        macd_exit_enabled=True, macd_exit_fast=5, macd_exit_slow=13, macd_exit_signal=3,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["macd"] - result["macd_exit_line"]).abs().dropna()
+    assert not diff.empty
+    assert (diff > 1e-9).any()
+
+
+def test_macd_entry_and_exit_share_computation_when_params_match(sample_df):
+    params = StrategyParams(
+        macd_enabled=True, macd_fast=12, macd_slow=26, macd_signal=9,
+        macd_exit_enabled=True, macd_exit_fast=12, macd_exit_slow=26, macd_exit_signal=9,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["macd"] - result["macd_exit_line"]).abs().dropna()
+    assert (diff < 1e-12).all()
+
+
+def test_ma_exit_params_are_independent_from_ma_trend(sample_df):
+    params = StrategyParams(
+        ma_trend_enabled=True, ma_fast_length=50, ma_slow_length=200, ma_type="sma",
+        ma_exit_enabled=True, ma_exit_fast=10, ma_exit_slow=20, ma_exit_type="ema",
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["ma_fast"] - result["ma_fast_exit"]).abs().dropna()
+    assert not diff.empty
+    assert (diff > 1e-9).any()
+
+
+def test_stoch_rsi_exit_params_are_independent(sample_df):
+    params = StrategyParams(
+        stoch_rsi_entry_enabled=True, stoch_rsi_length=14, stoch_rsi_k=3, stoch_rsi_d=3,
+        stoch_rsi_exit_enabled=True,
+        stoch_rsi_exit_length=21, stoch_rsi_exit_k=3, stoch_rsi_exit_d=3,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["stoch_k"] - result["stoch_k_exit"]).abs().dropna()
+    assert not diff.empty
+    assert (diff > 1e-9).any()
+
+
+def test_stoch_rsi_exit_shares_computation_when_params_match(sample_df):
+    params = StrategyParams(
+        stoch_rsi_entry_enabled=True, stoch_rsi_length=14, stoch_rsi_k=3, stoch_rsi_d=3,
+        stoch_rsi_exit_enabled=True,
+        stoch_rsi_exit_length=14, stoch_rsi_exit_k=3, stoch_rsi_exit_d=3,
+    )
+    result = SignalGenerator(params).calculate_indicators(sample_df)
+    diff = (result["stoch_k"] - result["stoch_k_exit"]).abs().dropna()
+    assert (diff < 1e-12).all()
