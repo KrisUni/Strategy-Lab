@@ -1,4 +1,13 @@
-"""MACD exit spec — exit when MACD gives signal opposite to entry direction."""
+"""MACD exit spec — exit when MACD gives signal opposite to entry direction.
+
+Self-contained — owns its own computation params (fast, slow, signal) and
+decision params (mode). Opportunistically reuses the entry's MACD columns
+when params match. Writes to its own columns 'macd_exit_line',
+'macd_exit_signal_line', 'macd_exit_hist'.
+
+Note: param 'macd_exit_signal' is the signal-line smoothing length;
+column 'macd_exit_signal_line' is the output column — intentionally distinct names.
+"""
 from typing import Any, Dict
 import pandas as pd
 from plotly import graph_objects as go
@@ -7,9 +16,23 @@ from .. import macd as _macd
 
 
 def compute_macd_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    if "macd" not in df.columns:
-        df["macd"], df["macd_signal"], df["macd_hist"] = _macd(
-            df["close"], params["macd_fast"], params["macd_slow"], params["macd_signal"],
+    entry_reusable = (
+        params.get("macd_enabled", False)
+        and params["macd_exit_fast"]   == params["macd_fast"]
+        and params["macd_exit_slow"]   == params["macd_slow"]
+        and params["macd_exit_signal"] == params["macd_signal"]
+        and "macd" in df.columns
+    )
+    if entry_reusable:
+        df["macd_exit_line"]        = df["macd"]
+        df["macd_exit_signal_line"] = df["macd_signal"]
+        df["macd_exit_hist"]        = df["macd_hist"]
+    else:
+        df["macd_exit_line"], df["macd_exit_signal_line"], df["macd_exit_hist"] = _macd(
+            df["close"],
+            params["macd_exit_fast"],
+            params["macd_exit_slow"],
+            params["macd_exit_signal"],
         )
     return df
 
@@ -17,43 +40,43 @@ def compute_macd_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
 def long_signal_macd_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
     mode = params["macd_exit_mode"]
     if mode == "histogram":
-        return df["macd_hist"] < 0
+        return df["macd_exit_hist"] < 0
     elif mode == "crossover":
-        return df["macd"] < df["macd_signal"]
+        return df["macd_exit_line"] < df["macd_exit_signal_line"]
     else:   # zero-line
-        return df["macd"] < 0
+        return df["macd_exit_line"] < 0
 
 
 def short_signal_macd_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
     mode = params["macd_exit_mode"]
     if mode == "histogram":
-        return df["macd_hist"] > 0
+        return df["macd_exit_hist"] > 0
     elif mode == "crossover":
-        return df["macd"] > df["macd_signal"]
+        return df["macd_exit_line"] > df["macd_exit_signal_line"]
     else:   # zero-line
-        return df["macd"] > 0
+        return df["macd_exit_line"] > 0
 
 
 def render_macd_exit(ctx: PlotContext) -> None:
     rn = dict(row=ctx.row, col=ctx.col)
-    hist = ctx.idf["macd_hist"].fillna(0)
+    hist = ctx.idf["macd_exit_hist"].fillna(0)
     bar_colors = [
         "rgba(16,185,129,0.7)" if v >= 0 else "rgba(239,68,68,0.7)"
         for v in hist
     ]
     ctx.fig.add_trace(go.Bar(
         x=ctx.idf.index, y=hist, marker_color=bar_colors,
-        name="MACD Hist", showlegend=True,
+        name="MACD Exit Hist", showlegend=True,
     ), **rn)
     ctx.fig.add_trace(go.Scatter(
-        x=ctx.idf.index, y=ctx.idf["macd"], mode="lines",
+        x=ctx.idf.index, y=ctx.idf["macd_exit_line"], mode="lines",
         line=dict(color=ctx.palette.sky, width=1.2),
-        name="MACD", showlegend=True,
+        name="MACD Exit", showlegend=True,
     ), **rn)
     ctx.fig.add_trace(go.Scatter(
-        x=ctx.idf.index, y=ctx.idf["macd_signal"], mode="lines",
+        x=ctx.idf.index, y=ctx.idf["macd_exit_signal_line"], mode="lines",
         line=dict(color=ctx.palette.secondary, width=1),
-        name="Signal", showlegend=True,
+        name="MACD Exit Signal", showlegend=True,
     ), **rn)
     ctx.fig.add_hline(y=0, line_color=ctx.palette.neutral_grid,
         row=ctx.row, col=ctx.col)
@@ -74,12 +97,18 @@ register(IndicatorSpec(
     params=[
         ParamSpec("macd_exit_enabled", "bool", False, optimize=False,
                   label="MACD exit enabled", order=0),
+        ParamSpec("macd_exit_fast", "int", 12, min=1, max=100,
+                  label="Fast length", order=1),
+        ParamSpec("macd_exit_slow", "int", 26, min=2, max=200,
+                  label="Slow length", order=2),
+        ParamSpec("macd_exit_signal", "int", 9, min=1, max=50,
+                  label="Signal length", order=3),
         ParamSpec("macd_exit_mode", "categorical", "histogram",
                   choices=("histogram", "crossover", "zero-line"),
-                  label="Mode", order=1),
+                  label="Mode", order=4),
     ],
     compute=compute_macd_exit,
-    outputs=[],
+    outputs=["macd_exit_line", "macd_exit_signal_line", "macd_exit_hist"],
     long_signal=long_signal_macd_exit,
     short_signal=short_signal_macd_exit,
     reuses_outputs_from=["macd_entry"],

@@ -1,5 +1,8 @@
-"""Stochastic RSI exit spec — reuses computation from stoch_rsi_entry,
-has its own exit-specific overbought/oversold thresholds.
+"""Stochastic RSI exit spec — self-contained with independent compute params.
+
+Owns its own computation params (length, k, d) and decision params
+(overbought, oversold). Opportunistically reuses the entry's stoch_k/stoch_d
+columns when params match. Writes to its own columns 'stoch_k_exit'/'stoch_d_exit'.
 """
 from typing import Any, Dict
 import pandas as pd
@@ -9,25 +12,33 @@ from .. import stoch_rsi as _stoch_rsi
 
 
 def compute_stoch_rsi_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.DataFrame:
-    if "stoch_k" not in df.columns:
-        df["stoch_k"], df["stoch_d"] = _stoch_rsi(
+    entry_reusable = (
+        params.get("stoch_rsi_entry_enabled", False)
+        and params["stoch_rsi_exit_length"] == params["stoch_rsi_length"]
+        and params["stoch_rsi_exit_k"]      == params["stoch_rsi_k"]
+        and params["stoch_rsi_exit_d"]      == params["stoch_rsi_d"]
+        and "stoch_k" in df.columns
+    )
+    if entry_reusable:
+        df["stoch_k_exit"] = df["stoch_k"]
+        df["stoch_d_exit"] = df["stoch_d"]
+    else:
+        df["stoch_k_exit"], df["stoch_d_exit"] = _stoch_rsi(
             df["close"],
-            params["stoch_rsi_length"],
-            params["stoch_rsi_length"],
-            params["stoch_rsi_k"],
-            params["stoch_rsi_d"],
+            params["stoch_rsi_exit_length"],
+            params["stoch_rsi_exit_length"],
+            params["stoch_rsi_exit_k"],
+            params["stoch_rsi_exit_d"],
         )
     return df
 
 
 def long_signal_stoch_rsi_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
-    # Long exit: stoch_k climbs back above the EXIT overbought level
-    return df["stoch_k"] > params["stoch_rsi_exit_overbought"]
+    return df["stoch_k_exit"] > params["stoch_rsi_exit_overbought"]
 
 
 def short_signal_stoch_rsi_exit(df: pd.DataFrame, params: Dict[str, Any]) -> pd.Series:
-    # Short exit: stoch_k drops back below the EXIT oversold level
-    return df["stoch_k"] < params["stoch_rsi_exit_oversold"]
+    return df["stoch_k_exit"] < params["stoch_rsi_exit_oversold"]
 
 
 def _stoch_exit_hlines(ctx: PlotContext) -> None:
@@ -46,14 +57,14 @@ def _stoch_exit_hlines(ctx: PlotContext) -> None:
 def render_stoch_exit(ctx: PlotContext) -> None:
     rn = dict(row=ctx.row, col=ctx.col)
     ctx.fig.add_trace(go.Scatter(
-        x=ctx.idf.index, y=ctx.idf["stoch_k"], mode="lines",
+        x=ctx.idf.index, y=ctx.idf["stoch_k_exit"], mode="lines",
         line=dict(color=ctx.palette.sky, width=1.2),
-        name="Stoch %K", showlegend=True,
+        name="Stoch Exit %K", showlegend=True,
     ), **rn)
     ctx.fig.add_trace(go.Scatter(
-        x=ctx.idf.index, y=ctx.idf["stoch_d"], mode="lines",
+        x=ctx.idf.index, y=ctx.idf["stoch_d_exit"], mode="lines",
         line=dict(color=ctx.palette.secondary, width=1),
-        name="Stoch %D", showlegend=True,
+        name="Stoch Exit %D", showlegend=True,
     ), **rn)
     _stoch_exit_hlines(ctx)
     ctx.fig.update_yaxes(title_text="Stoch RSI", range=[0, 100],
@@ -73,13 +84,19 @@ register(IndicatorSpec(
     params=[
         ParamSpec("stoch_rsi_exit_enabled", "bool", False, optimize=False,
                   label="Stoch RSI exit enabled", order=0),
+        ParamSpec("stoch_rsi_exit_length", "int", 14, min=2, max=50,
+                  label="Length", order=1),
+        ParamSpec("stoch_rsi_exit_k", "int", 3, min=1, max=20,
+                  label="%K smooth", order=2),
+        ParamSpec("stoch_rsi_exit_d", "int", 3, min=1, max=20,
+                  label="%D smooth", order=3),
         ParamSpec("stoch_rsi_exit_overbought", "int", 80, min=51, max=99,
-                  label="Long exit overbought", direction="long", order=1),
+                  label="Long exit overbought", direction="long", order=4),
         ParamSpec("stoch_rsi_exit_oversold", "int", 20, min=1, max=49,
-                  label="Short exit oversold", direction="short", order=2),
+                  label="Short exit oversold", direction="short", order=5),
     ],
     compute=compute_stoch_rsi_exit,
-    outputs=[],
+    outputs=["stoch_k_exit", "stoch_d_exit"],
     long_signal=long_signal_stoch_rsi_exit,
     short_signal=short_signal_stoch_rsi_exit,
     reuses_outputs_from=["stoch_rsi_entry"],
