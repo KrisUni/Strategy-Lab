@@ -70,7 +70,8 @@ def render_indicator_section(group: str, p: Dict[str, Any]) -> None:
     for spec in specs:
         # Non-optimizable enable params (type=bool, optimize=False) double as the
         # expander toggle — render them first so the expander header is descriptive.
-        with st.expander(spec.name, expanded=False):
+        enabled = p.get(spec.enable_param, False)
+        with st.expander(spec.name, expanded=enabled):
             # Enable toggle (always the enable_param)
             enable_ps = next(ps for ps in spec.params if ps.name == spec.enable_param)
             p[spec.enable_param] = render_param_widget(

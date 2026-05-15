@@ -47,6 +47,11 @@ class EntryConflictMode(str, Enum):
     PREFER_SHORT = "prefer_short"
 
 
+class EntryExitConflictMode(str, Enum):
+    SKIP = "skip"
+    DEFER = "defer"
+
+
 _STRATEGY_LEVEL_DEFAULTS: Dict[str, Any] = {
     "trade_direction":        TradeDirection.LONG_ONLY,
     "entry_operator":         ConditionOperator.AND,
@@ -54,6 +59,7 @@ _STRATEGY_LEVEL_DEFAULTS: Dict[str, Any] = {
     "allow_same_bar_exit":    True,
     "allow_same_bar_reversal": False,
     "entry_conflict_mode":    EntryConflictMode.SKIP,
+    "entry_exit_conflict_mode": EntryExitConflictMode.SKIP,
     "position_size_pct":      100.0,
     "use_kelly":              False,
     "kelly_fraction":         0.5,
@@ -133,6 +139,9 @@ class StrategyParams:
         ecm = d.get("entry_conflict_mode")
         if isinstance(ecm, str):
             d["entry_conflict_mode"] = EntryConflictMode(ecm.lower())
+        eecm = d.get("entry_exit_conflict_mode")
+        if isinstance(eecm, str):
+            d["entry_exit_conflict_mode"] = EntryExitConflictMode(eecm.lower())
         # Seed exit compute params from entry params when exit keys are absent.
         for entry_key, exit_key in _ENTRY_TO_EXIT_PARAM_MAPPINGS:
             if exit_key not in d and entry_key in d:
@@ -284,9 +293,13 @@ class SignalGenerator:
             if spec.group != "exit":
                 continue
             if spec.long_signal is not None:
-                exit_long_masks.append(spec.long_signal(df, params))
+                mask = spec.long_signal(df, params)
+                exit_long_masks.append(mask)
+                df[f'exit_long_{spec.key}'] = mask.fillna(False)
             if spec.short_signal is not None:
-                exit_short_masks.append(spec.short_signal(df, params))
+                mask = spec.short_signal(df, params)
+                exit_short_masks.append(mask)
+                df[f'exit_short_{spec.key}'] = mask.fillna(False)
 
         exit_long  = self._combine_condition_masks(exit_long_masks,  p.exit_operator, df.index)
         exit_short = self._combine_condition_masks(exit_short_masks, p.exit_operator, df.index)

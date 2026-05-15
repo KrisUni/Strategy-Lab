@@ -32,6 +32,7 @@ STRATEGY_LEVEL_PARAMS: frozenset = frozenset({
     "allow_same_bar_exit",
     "allow_same_bar_reversal",
     "entry_conflict_mode",
+    "entry_exit_conflict_mode",
     "position_size_pct",
     "use_kelly",
     "kelly_fraction",

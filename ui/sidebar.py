@@ -29,6 +29,7 @@ _INTERVAL_MAX_DAYS = {
 INTERVALS = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
 TRADE_DIRECTION_OPTIONS = ["Long Only", "Short Only", "Both"]
 ENTRY_CONFLICT_OPTIONS = ["skip", "prefer_long", "prefer_short"]
+ENTRY_EXIT_CONFLICT_OPTIONS = ["skip", "defer"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,6 +69,17 @@ def render_sidebar() -> None:
             }[value],
             key="ecm",
             help="Controls what happens when both entry directions are true on the same bar in Both mode.",
+        )
+        p['entry_exit_conflict_mode'] = st.selectbox(
+            "Entry Into Active Exit",
+            ENTRY_EXIT_CONFLICT_OPTIONS,
+            index=ENTRY_EXIT_CONFLICT_OPTIONS.index(p.get('entry_exit_conflict_mode', 'skip')),
+            format_func=lambda value: {
+                "skip": "Skip entry (default)",
+                "defer": "Enter, arm-block exit",
+            }[value],
+            key="eecm",
+            help="What to do when the entry signal fires while an exit signal is already True.",
         )
 
         _render_position_sizing(p)
@@ -209,7 +221,7 @@ def _render_visual_indicators(p: dict) -> None:
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
     st.markdown("### 🔭 Visual Indicators")
 
-    with st.expander("📐 HPDR Bands", expanded=False):
+    with st.expander("📐 HPDR Bands", expanded=p.get('hpdr_enabled', False)):
         p['hpdr_enabled'] = st.toggle("Show on chart", p['hpdr_enabled'], key="hpdr_e")
         if p['hpdr_enabled']:
             p['hpdr_lookback'] = st.slider("Lookback", 30, 504, p['hpdr_lookback'], key="hpdr_lb",
@@ -217,7 +229,7 @@ def _render_visual_indicators(p: dict) -> None:
             st.caption("5 zones: teal (±0.5σ) → green → yellow → orange → red (±2.5σ)")
             st.caption("Y-axis is always locked to price range.")
 
-    with st.expander("〰️ RSI Hidden Divergence", expanded=False):
+    with st.expander("〰️ RSI Hidden Divergence", expanded=p.get('rsi_div_enabled', False)):
         p['rsi_div_enabled'] = st.toggle("Show on chart", p['rsi_div_enabled'], key="rdiv_e")
         if p['rsi_div_enabled']:
             p['rsi_div_length'] = st.slider("RSI Length", 7, 21, p['rsi_div_length'], key="rdiv_l")
@@ -310,6 +322,7 @@ def _render_strategy_persistence() -> None:
             # Sync manually-keyed sidebar widgets
             st.session_state.tdir = merged.get("trade_direction", "Long Only")
             st.session_state.ecm = merged.get("entry_conflict_mode", "skip")
+            st.session_state.eecm = merged.get("entry_exit_conflict_mode", "skip")
             st.session_state.eop = merged.get("entry_operator", "and")
             st.session_state.same_bar_exit = bool(merged.get("allow_same_bar_exit", True))
             st.session_state.same_bar_reversal = bool(merged.get("allow_same_bar_reversal", False))
