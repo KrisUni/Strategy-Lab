@@ -1,12 +1,12 @@
 {
-  "pamrp_long_spy": "bbbb5c19a6eaa73b7099febf6da6b12e534f8fd2eda23d7ceb828662ddd75636",
-  "pamrp_bbwp_long_qqq": "1dd15a932eb24350b64a7612d41f02655a1d93aaaf404379c1025989812cb144",
-  "rsi_both_eth_trailing": "63756e8f5b0a633cc855e72be4b91b93f6bbf2646bb0a4b4d9d7689bc08cd168",
-  "adx_matrend_long_aapl_timeexit": "b6cafb7da588b9af91f41a70e707560d04c30d0bc2f903c2f5d83b04f686543b",
-  "macd_volume_both_tsla_pamrpexit": "633e9ccd4aacff0c72728451117cee20774819cc5cba03d123bbafd008ec8866",
-  "ma_trend_with_ma_exit_long_aapl": "65bc25d099a009ac7093d9744f13a4c94c9c6a7b8f9c1d384466f2fd38c810aa",
-  "stoch_rsi_meanrevert_with_asym_exit_spy": "fb90d5775326908f26d093e9d95f512c309e1906a9d495a13441ef3e0efff389",
-  "rsi_independent_exit_aapl": "314a2dce1429cd4da9a269879375bc270932f2e3edd37676a765a0593a5fe5e2",
-  "matrend_with_fast_ma_exit_qqq": "de40c0c9a8e73dfe207357a82c2e5f907253be21da3cfedf4ce21e7afb1c68d2",
-  "stoch_rsi_asym_exit_spy": "f8a2ad15f629829be6567037ee859103bee92bdb258b17492035d011ed792690"
+  "pamrp_long_spy": "f75b5dde5ed7831a617a6a6dc79c86e83a8bab4517bbe9dc6f11b815428b099f",
+  "pamrp_bbwp_long_qqq": "17250ccfec429ba2c025c7818bf3ed12e027fa386134118d552889e19a328a3e",
+  "rsi_both_eth_trailing": "51e935b428b681d411b2dc285badbf199494db56b206d5f02a1959c612d5ab72",
+  "adx_matrend_long_aapl_timeexit": "9322597c71ea758ce27176c571942431d7063e874400dbd18439a2da77ea7a64",
+  "macd_volume_both_tsla_pamrpexit": "deaa3583cc014f433eb1cd1ab34a57ef0c66d7ec9f2276b008f9eb88b2fe39db",
+  "ma_trend_with_ma_exit_long_aapl": "7031c7d0ea5c9fb79c26f49b59a1736bc361eea074888c0ed3fb5b23eb668f70",
+  "stoch_rsi_meanrevert_with_asym_exit_spy": "fbc54d2ab35db1ce9fd86b6bfd5481143dc2382e1197b0ff832982a1a7f9581e",
+  "rsi_independent_exit_aapl": "fd9d695feca4f2d3aa39083108cc7e377b60f77e703aed28b8c5da8bf3e99745",
+  "matrend_with_fast_ma_exit_qqq": "885c75a9039ff6bfb0af28560fb8a8bb9ff52ed96531e47ace684b93fddadc5c",
+  "stoch_rsi_asym_exit_spy": "187cfbae68c4cf1a29e1dcaa003088cc79444eba61f3d7d6d65ac9b1ff05aeec"
 }

@@ -18,6 +18,7 @@ Changes from previous version
           separate UI param exists yet — behaviour is unchanged for existing configs.
 """
 
+import warnings
 import pandas as pd
 from typing import Dict, Any, Iterable
 from enum import Enum
@@ -199,19 +200,67 @@ class SignalGenerator:
         long_or_both  = td in (TradeDirection.LONG_ONLY,  TradeDirection.BOTH)
         short_or_both = td in (TradeDirection.SHORT_ONLY, TradeDirection.BOTH)
 
-        long_masks:  list[pd.Series] = []
-        short_masks: list[pd.Series] = []
+        trigger_long_masks:  list[pd.Series] = []
+        trigger_short_masks: list[pd.Series] = []
+        filter_long_masks:   list[pd.Series] = []
+        filter_short_masks:  list[pd.Series] = []
+
+        has_active_entry_specs = False
 
         for spec in enabled_specs(params):
             if spec.group != "entry":
                 continue
-            if long_or_both and spec.long_signal is not None:
-                long_masks.append(spec.long_signal(df, params))
-            if short_or_both and spec.short_signal is not None:
-                short_masks.append(spec.short_signal(df, params))
+            if spec.long_signal is None and spec.short_signal is None:
+                continue
+            has_active_entry_specs = True
 
-        long_signal  = self._combine_condition_masks(long_masks,  p.entry_operator, df.index)
-        short_signal = self._combine_condition_masks(short_masks, p.entry_operator, df.index)
+            role = (
+                params.get(spec.signal_mode_param, spec.signal_role)
+                if spec.signal_mode_param
+                else spec.signal_role
+            )
+
+            if role == "trigger":
+                if long_or_both and spec.long_signal is not None:
+                    raw = spec.long_signal(df, params).fillna(False)
+                    edge = raw & ~raw.shift(1, fill_value=False)
+                    trigger_long_masks.append(edge)
+                if short_or_both and spec.short_signal is not None:
+                    raw = spec.short_signal(df, params).fillna(False)
+                    edge = raw & ~raw.shift(1, fill_value=False)
+                    trigger_short_masks.append(edge)
+            else:  # filter
+                if long_or_both and spec.long_signal is not None:
+                    filter_long_masks.append(spec.long_signal(df, params))
+                if short_or_both and spec.short_signal is not None:
+                    filter_short_masks.append(spec.short_signal(df, params))
+
+        # Warn when only filter-role indicators are enabled — no entries will fire.
+        if has_active_entry_specs and not trigger_long_masks and not trigger_short_masks:
+            warnings.warn(
+                "No trigger-role entry indicators are enabled. All active entry "
+                "indicators are filters — the strategy will never enter a trade. "
+                "Enable at least one trigger indicator (e.g., PAMRP, RSI, "
+                "Supertrend, MACD, Stoch RSI).",
+                UserWarning,
+                stacklevel=4,
+            )
+
+        # Triggers always OR; filters combine via the user's entry_operator.
+        trigger_long  = self._combine_condition_masks(trigger_long_masks,  ConditionOperator.OR, df.index)
+        trigger_short = self._combine_condition_masks(trigger_short_masks, ConditionOperator.OR, df.index)
+
+        filter_long = (
+            self._combine_condition_masks(filter_long_masks, p.entry_operator, df.index)
+            if filter_long_masks else pd.Series(True, index=df.index)
+        )
+        filter_short = (
+            self._combine_condition_masks(filter_short_masks, p.entry_operator, df.index)
+            if filter_short_masks else pd.Series(True, index=df.index)
+        )
+
+        long_signal  = trigger_long  & filter_long
+        short_signal = trigger_short & filter_short
 
         if td == TradeDirection.LONG_ONLY:
             short_signal = pd.Series(False, index=df.index)

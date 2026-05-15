@@ -81,6 +81,7 @@ register(IndicatorSpec(
     ],
     compute=compute_macd,
     outputs=["macd", "macd_signal", "macd_hist"],
+    signal_role="trigger",
     long_signal=long_signal_macd,
     short_signal=short_signal_macd,
     plot=PlotSpec(

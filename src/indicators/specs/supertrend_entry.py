@@ -55,6 +55,7 @@ register(IndicatorSpec(
     ],
     compute=compute_supertrend,
     outputs=["supertrend", "st_direction"],
+    signal_role="trigger",
     long_signal=long_signal_supertrend,
     short_signal=short_signal_supertrend,
     plot=PlotSpec(
