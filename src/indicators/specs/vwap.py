@@ -46,6 +46,7 @@ register(IndicatorSpec(
     ],
     compute=compute_vwap,
     outputs=["vwap"],
+    signal_role="filter",
     long_signal=None,
     short_signal=None,
     plot=PlotSpec(

@@ -195,7 +195,7 @@ class TestStrategy:
         assert params.entry_conflict_mode == EntryConflictMode.PREFER_SHORT
 
     def test_entry_operator_or_allows_any_enabled_filter(self):
-        """OR entry mode should trigger when any enabled filter is true."""
+        """Triggers always OR — any trigger firing on a new edge produces entry."""
         idx = pd.RangeIndex(3)
         df = pd.DataFrame({
             'pamrp_entry': [10, 60, 10],
@@ -214,8 +214,9 @@ class TestStrategy:
         assert result['entry_long'].tolist() == [True, True, True]
         assert result['entry_short'].tolist() == [False, False, False]
 
-    def test_entry_operator_and_requires_all_enabled_filters(self):
-        """AND entry mode should require every enabled filter to pass."""
+    def test_trigger_indicators_or_regardless_of_entry_operator(self):
+        """Trigger indicators always OR among themselves; entry_operator only governs filters.
+        With two triggers (PAMRP + RSI) and AND entry_operator, triggers still OR."""
         idx = pd.RangeIndex(3)
         df = pd.DataFrame({
             'pamrp_entry': [10, 60, 10],
@@ -231,7 +232,7 @@ class TestStrategy:
 
         result = SignalGenerator(params).generate_entry_signals(df)
 
-        assert result['entry_long'].tolist() == [False, False, True]
+        assert result['entry_long'].tolist() == [True, True, True]
         assert result['entry_short'].tolist() == [False, False, False]
 
     def test_exit_operator_or_matches_legacy_behavior(self):

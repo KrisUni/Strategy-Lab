@@ -31,6 +31,7 @@ def get_default_params() -> Dict[str, Any]:
         'allow_same_bar_exit': True,
         'allow_same_bar_reversal': False,
         'entry_conflict_mode': 'skip',
+        'entry_exit_conflict_mode': 'skip',
         'position_size_pct': 100.0, 'use_kelly': False, 'kelly_fraction': 0.5,
         'pamrp_enabled': False,
         'pamrp_entry_ma_length': 20, 'pamrp_entry_lookback': 350, 'pamrp_entry_ma_type': 'sma',

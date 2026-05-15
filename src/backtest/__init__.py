@@ -5,9 +5,9 @@ Backtest Module - v1.0.0
 
 import pandas as pd
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
-from ..strategy import StrategyParams, SignalGenerator, EntryConflictMode
+from ..strategy import StrategyParams, SignalGenerator, EntryConflictMode, EntryExitConflictMode
 
 DEFAULT_COMMISSION_PCT = 0.1
 DEFAULT_SLIPPAGE_PCT = 0.0
@@ -30,6 +30,7 @@ class Trade:
     bars_held: int = 0
     mae: float = 0.0   # Maximum Adverse Excursion (%)
     mfe: float = 0.0   # Maximum Favorable Excursion (%)
+    arm_blocked_exits: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -459,10 +460,31 @@ class BacktestEngine:
                 # bar[i]'s open. No look-ahead.
                 # ─────────────────────────────────────────────────────────
                 if exit_price is None:
-                    if position.direction == 'long' and prev_row['exit_long_signal']:
-                        exit_price = row['open']
-                        exit_reason = 'signal'
-                    elif position.direction == 'short' and prev_row['exit_short_signal']:
+                    direction = position.direction
+                    if (p.entry_exit_conflict_mode == EntryExitConflictMode.DEFER
+                            and position.arm_blocked_exits):
+                        # Clear arm-blocks for specs that have flipped False since entry
+                        for k in [k for k in list(position.arm_blocked_exits)
+                                  if not bool(prev_row.get(f'exit_{direction}_{k}', False))]:
+                            del position.arm_blocked_exits[k]
+                        # Combine per-spec exit columns, treating still-blocked specs as False
+                        prefix = f'exit_{direction}_'
+                        masks = []
+                        for col in df.columns:
+                            if not col.startswith(prefix) or col == f'exit_{direction}_signal':
+                                continue
+                            spec_key = col[len(prefix):]
+                            val = bool(prev_row.get(col, False))
+                            if spec_key in position.arm_blocked_exits:
+                                val = False
+                            masks.append(val)
+                        if p.exit_operator == 'or':
+                            exit_active = any(masks) if masks else False
+                        else:
+                            exit_active = all(masks) if masks else False
+                    else:
+                        exit_active = bool(prev_row[f'exit_{direction}_signal'])
+                    if exit_active:
                         exit_price = row['open']
                         exit_reason = 'signal'
 
@@ -520,6 +542,13 @@ class BacktestEngine:
                 elif exited_direction_this_bar == 'short':
                     short_signal = False
 
+                # Handle entry firing into an already-active exit signal.
+                if p.entry_exit_conflict_mode == EntryExitConflictMode.SKIP:
+                    if long_signal and bool(prev_row['exit_long_signal']):
+                        long_signal = False
+                    if short_signal and bool(prev_row['exit_short_signal']):
+                        short_signal = False
+
                 if long_signal and short_signal:
                     if p.entry_conflict_mode == EntryConflictMode.SKIP:
                         long_signal = False
@@ -560,6 +589,19 @@ class BacktestEngine:
                     cash -= position.size_dollars
                     highest_since_entry = row['high']
                     lowest_since_entry = row['low']
+
+                    # Snapshot arm-blocked exits for DEFER mode.
+                    if p.entry_exit_conflict_mode == EntryExitConflictMode.DEFER:
+                        direction = position.direction
+                        prefix = f'exit_{direction}_'
+                        blocked = {
+                            col[len(prefix):]: True
+                            for col in df.columns
+                            if col.startswith(prefix)
+                            and col != f'exit_{direction}_signal'
+                            and bool(prev_row.get(col, False))
+                        }
+                        position.arm_blocked_exits = blocked
 
                     # ─────────────────────────────────────────────────────
                     # BUG 2 FIX: Optional same-bar stop checks on the ENTRY bar.

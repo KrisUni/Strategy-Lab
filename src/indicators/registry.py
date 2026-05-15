@@ -21,6 +21,7 @@ import pandas as pd
 ParamType = Literal["int", "float", "categorical", "bool"]
 Direction = Literal["long", "short", "both"]
 Group = Literal["entry", "exit", "risk", "core"]
+SignalRole = Literal["trigger", "filter"]
 
 # Strategy-level params that live outside the indicator registry.
 # These are owned by StrategyParams itself, not by any IndicatorSpec.
@@ -31,6 +32,7 @@ STRATEGY_LEVEL_PARAMS: frozenset = frozenset({
     "allow_same_bar_exit",
     "allow_same_bar_reversal",
     "entry_conflict_mode",
+    "entry_exit_conflict_mode",
     "position_size_pct",
     "use_kelly",
     "kelly_fraction",
@@ -131,6 +133,18 @@ class IndicatorSpec:
         # Used for topological sort (dependency comes first) and dedup
         # (if a dep is enabled, its compute already ran).
         # Example: bbwp_exit reads the "bbwp" column from bbwp_entry.
+
+    signal_role: SignalRole = "trigger"
+        # "trigger" — entry fires on False→True edge of long_signal/short_signal.
+        #             Re-entry blocked while the same signal remains continuously True.
+        # "filter"  — entry fires only when a trigger fires AND this signal is True.
+        #             The filter describes regime/eligibility, not timing.
+        # Exit specs: field is ignored (exits have no re-entry problem).
+
+    signal_mode_param: Optional[str] = None
+        # Name of a ParamSpec (categorical "trigger"|"filter") that lets the user
+        # override signal_role at runtime. Set only for indicators that can
+        # legitimately serve either role (e.g. PAMRP, RSI, Stoch RSI).
 
     plot: Optional[PlotSpec] = None
         # None = no visual. When set, the chart engine calls plot.render(ctx).
