@@ -520,6 +520,14 @@ class BacktestEngine:
                 elif exited_direction_this_bar == 'short':
                     short_signal = False
 
+                # Skip entry if the exit signal was True on the same bar the entry fired.
+                # Entering into an already-active exit produces a deterministic 1-bar
+                # round-trip loss (full round-trip costs, no upside).
+                if long_signal and bool(prev_row['exit_long_signal']):
+                    long_signal = False
+                if short_signal and bool(prev_row['exit_short_signal']):
+                    short_signal = False
+
                 if long_signal and short_signal:
                     if p.entry_conflict_mode == EntryConflictMode.SKIP:
                         long_signal = False

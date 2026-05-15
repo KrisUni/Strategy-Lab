@@ -1,12 +1,12 @@
 {
   "pamrp_long_spy": "f75b5dde5ed7831a617a6a6dc79c86e83a8bab4517bbe9dc6f11b815428b099f",
-  "pamrp_bbwp_long_qqq": "17250ccfec429ba2c025c7818bf3ed12e027fa386134118d552889e19a328a3e",
+  "pamrp_bbwp_long_qqq": "c19f7a4af7d3a2c04ac572fd573584a683250c1d861caec3651a874e0cfffdfe",
   "rsi_both_eth_trailing": "51e935b428b681d411b2dc285badbf199494db56b206d5f02a1959c612d5ab72",
   "adx_matrend_long_aapl_timeexit": "9322597c71ea758ce27176c571942431d7063e874400dbd18439a2da77ea7a64",
-  "macd_volume_both_tsla_pamrpexit": "deaa3583cc014f433eb1cd1ab34a57ef0c66d7ec9f2276b008f9eb88b2fe39db",
+  "macd_volume_both_tsla_pamrpexit": "16f415ba7ff6a0e987db7aae501aff407c45a34f9a9439a55ccb85b3d839cbd8",
   "ma_trend_with_ma_exit_long_aapl": "7031c7d0ea5c9fb79c26f49b59a1736bc361eea074888c0ed3fb5b23eb668f70",
   "stoch_rsi_meanrevert_with_asym_exit_spy": "fbc54d2ab35db1ce9fd86b6bfd5481143dc2382e1197b0ff832982a1a7f9581e",
   "rsi_independent_exit_aapl": "fd9d695feca4f2d3aa39083108cc7e377b60f77e703aed28b8c5da8bf3e99745",
   "matrend_with_fast_ma_exit_qqq": "885c75a9039ff6bfb0af28560fb8a8bb9ff52ed96531e47ace684b93fddadc5c",
-  "stoch_rsi_asym_exit_spy": "187cfbae68c4cf1a29e1dcaa003088cc79444eba61f3d7d6d65ac9b1ff05aeec"
+  "stoch_rsi_asym_exit_spy": "b3135823569fbbfcf5d77697e64a435265099a4b6cb3e9dcc8db538f0942fda9"
 }
