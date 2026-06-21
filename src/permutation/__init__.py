@@ -50,36 +50,62 @@ class PermutationResult:
 
 def _permute_prices(df: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     """
-    Shuffle daily returns and reconstruct synthetic OHLCV prices.
+    Signal-free surrogate via log-decomposed bar permutation
+    (Masters-style OHLC permutation).
 
-    Preserves: return distribution, volatility, volume distribution.
-    Destroys: temporal structure, autocorrelation, any real signal.
+    Each bar i>=1 is split into an inter-bar gap ln(open_i / close_{i-1})
+    and an intra-bar shape tuple (ln(close/open), ln(high/open), ln(low/open)).
+    Gaps and shape-tuples are permuted, then the series is rebuilt so that
+    every bar's open chains off the previous *reconstructed* close. This
+    guarantees price continuity (no synthetic gaps) while destroying temporal
+    structure in BOTH the gap sequence and the bar-shape sequence.
+
+    DESIGN: gaps and shape-tuples use INDEPENDENT permutations (perm_gap,
+    perm_shape) — this destroys any contemporaneous gap<->shape time-locking
+    and preserves both marginal distributions. Set perm_shape = perm_gap for
+    "whole-bar" mode (more conservative null). See patch prompt for tradeoff.
+
+    Preserves: gap distribution, bar-shape distribution, volatility, volume.
+    Destroys:  temporal ordering / autocorrelation / any real signal.
     """
-    close = df['close'].values
-    returns = np.diff(close) / close[:-1]
+    o = df['open'].values.astype(float)
+    h = df['high'].values.astype(float)
+    l = df['low'].values.astype(float)
+    c = df['close'].values.astype(float)
+    n = len(c)
+    if n < 3:
+        return df.copy()
+    if (o <= 0).any() or (h <= 0).any() or (l <= 0).any() or (c <= 0).any():
+        raise ValueError("_permute_prices requires strictly positive OHLC")
 
-    # Shuffle returns
-    rng.shuffle(returns)
+    # Decompose (bars 1..n-1; bar 0 is the anchor)
+    gap  = np.log(o[1:] / c[:-1])      # inter-bar, length n-1
+    body = np.log(c[1:] / o[1:])       # intra-bar, length n-1
+    hi   = np.log(h[1:] / o[1:])       # >= max(0, body) for valid bars
+    lo   = np.log(l[1:] / o[1:])       # <= min(0, body) for valid bars
 
-    # Reconstruct close prices
-    new_close = np.empty(len(close))
-    new_close[0] = close[0]
-    for i in range(len(returns)):
-        new_close[i + 1] = new_close[i] * (1 + returns[i])
+    # Permute gaps and shape-tuples independently
+    pg = rng.permutation(n - 1)
+    ps = rng.permutation(n - 1)        # set ps = pg for whole-bar mode
+    gap_s, body_s, hi_s, lo_s = gap[pg], body[ps], hi[ps], lo[ps]
 
-    # Scale OHLV relative to close
-    ratio = new_close / close
+    # Reconstruct (vectorized; close path = cumulative product)
+    new_c = np.empty(n); new_o = np.empty(n); new_h = np.empty(n); new_l = np.empty(n)
+    new_o[0], new_h[0], new_l[0], new_c[0] = o[0], h[0], l[0], c[0]   # anchor unchanged
+    new_c[1:] = c[0] * np.exp(np.cumsum(gap_s + body_s))
+    new_o[1:] = new_c[:-1] * np.exp(gap_s)
+    new_h[1:] = new_o[1:] * np.exp(hi_s)
+    new_l[1:] = new_o[1:] * np.exp(lo_s)
 
     new_df = df.copy()
-    new_df['close'] = new_close
-    new_df['open'] = df['open'].values * ratio
-    new_df['high'] = df['high'].values * ratio
-    new_df['low'] = df['low'].values * ratio
-    # Volume stays the same (shuffled returns, not volume)
+    new_df['open']  = new_o
+    new_df['high']  = new_h
+    new_df['low']   = new_l
+    new_df['close'] = new_c
 
-    # Enforce OHLC consistency
-    new_df['high'] = new_df[['open', 'high', 'close']].max(axis=1)
-    new_df['low'] = new_df[['open', 'low', 'close']].min(axis=1)
+    # Float-safety net; near-noop because shape tuples are kept intact.
+    new_df['high'] = new_df[['open', 'high', 'low', 'close']].max(axis=1)
+    new_df['low']  = new_df[['open', 'high', 'low', 'close']].min(axis=1)
 
     return new_df
 

@@ -19,7 +19,7 @@
 
 ## Why this exists
 
-Strategy Lab is built for researchers who want to know whether their edge is real. The platform's job is to give you an honest answer — through realistic fills, leakage-free signals, walk-forward selection that doesn't introduce hindsight bias, and a permutation test that destroys signal cleanly while preserving bar structure.
+Strategy Lab is built for researchers who want to know whether their edge is real. The platform's job is to give you an honest answer — through realistic fills, leakage-free signals, walk-forward selection that doesn't introduce hindsight bias, and a permutation test that destroys signal cleanly while preserving the bar-shape distribution.
 Honest backtests are harder to fake an edge in. That's the point
 
 ---
@@ -43,7 +43,7 @@ Honest backtests are harder to fake an edge in. That's the point
 - Pure Optuna for the fit — no LLM does any actual fitting
 
 ### Validation
-- **In-sample permutation test** — shuffles close-to-close returns while preserving intra-bar structure, then re-optimizes on each shuffle. p-value vs. the null of "no real edge."
+- **In-sample permutation test** — shuffles close-to-close returns and intra-bar bar-shapes, preserving both marginal distributions, then re-optimizes on each shuffle. p-value vs. the null of "no real edge."
 - **Monte Carlo** — trade shuffle, block bootstrap of returns, noise injection. Ruin-threshold probability included.
 - **Trade-log regression tests** — bit-identical trade hashes across releases, not just metric-level equality.
 
@@ -208,10 +208,10 @@ The naive permutation test shuffles entire OHLC rows. This breaks price continui
 
 Strategy Lab decomposes each bar into:
 
-- a **close-to-close return** (the temporal signal)
-- a set of **scale-independent intra-bar ratios** (open/high/low relative to close)
+- an **inter-bar gap** `ln(open_i / close_{i-1})` — the overnight/between-bar jump
+- an **intra-bar shape tuple** `(ln(close/open), ln(high/open), ln(low/open))` — the bar's body and wicks, all relative to that bar's own open
 
-Returns are shuffled. Bar structures are shuffled as units. The continuous price series is then reconstructed. This preserves return distribution, volatility, and bar-shape distribution while destroying temporal autocorrelation and any genuine signal.
+Both sequences are independently permuted, then the series is reconstructed so each bar's open chains off the previous reconstructed close via a shuffled gap. This preserves both the gap distribution and the bar-shape distribution while destroying temporal autocorrelation and any genuine signal.
 
 p-value = fraction of permuted optimizations whose best metric ≥ the real optimization's best metric. p < 0.05 → statistically significant edge.
 
