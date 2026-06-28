@@ -245,5 +245,19 @@ def apply_styles() -> None:
     }
     #MainMenu, footer {visibility: hidden;}
     header[data-testid="stHeader"] { background: transparent !important; backdrop-filter: none !important; }
+    /* Advisor rail */
+    [data-testid="stChatMessage"] {
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 0.45rem 0.65rem !important;
+        margin-bottom: 0.3rem;
+        background: rgba(10, 15, 24, 0.6);
+        font-size: 0.82rem;
+    }
+    [data-testid="stChatMessage"] p {
+        font-size: 0.82rem;
+        color: var(--text-primary);
+        margin: 0;
+    }
 </style>
 """, unsafe_allow_html=True)

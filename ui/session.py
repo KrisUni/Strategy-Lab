@@ -12,6 +12,7 @@ import streamlit as st
 from typing import Any, Dict
 
 from src.backtest import DEFAULT_COMMISSION_PCT, DEFAULT_SLIPPAGE_PCT
+from ui.advisor.settings import init_advisor_state
 from ui.state_migration import (
     migrate_legacy_pamrp_params,
     migrate_legacy_pamrp_pins,
@@ -97,6 +98,8 @@ def init_session_state() -> None:
         ('commission', DEFAULT_COMMISSION_PCT),
         ('slippage', DEFAULT_SLIPPAGE_PCT),
         ('pinned_params', set()),
+        ('loaded_symbol', None),
+        ('loaded_interval', None),
     ]
     for key, default in defaults:
         if key not in st.session_state:
@@ -116,3 +119,5 @@ def init_session_state() -> None:
     for k, v in get_default_params().items():
         if k not in st.session_state.params:
             st.session_state.params[k] = v
+
+    init_advisor_state()

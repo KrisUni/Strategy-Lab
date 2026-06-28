@@ -33,7 +33,9 @@ Typical session flow:
 from __future__ import annotations
 
 import ast
+import json
 import math
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -813,7 +815,170 @@ def run_sensitivity(
 # Research log
 # ─────────────────────────────────────────────────────────────────────────────
 
-_LOG_PATH = Path(__file__).parent.parent / "RESEARCH_LOG.md"
+_LOG_PATH   = Path(__file__).parent.parent / "RESEARCH_LOG.md"
+_JSONL_PATH = Path(__file__).parent.parent / "RESEARCH_LOG.jsonl"
+
+
+def _load_jsonl() -> List[Dict[str, Any]]:
+    if not _JSONL_PATH.exists():
+        return []
+    entries: List[Dict[str, Any]] = []
+    with open(_JSONL_PATH, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    return entries
+
+
+def _append_jsonl(entry: Dict[str, Any]) -> None:
+    with open(_JSONL_PATH, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _entry_to_md_body(entry: Dict[str, Any]) -> str:
+    sym     = entry.get("symbol", "UNKNOWN")
+    ivl     = entry.get("interval", "unknown")
+    today   = entry.get("date", "unknown")
+    verdict = entry.get("verdict", "UNKNOWN")
+    metrics = entry.get("metrics") or {}
+
+    def _fmt(key: str, pct: bool = False) -> str:
+        v = metrics.get(key)
+        if v is None:
+            return "—"
+        return f"{v:.2f}%" if pct else f"{v:.4f}"
+
+    eff  = entry.get("efficiency_ratio")
+    pval = entry.get("p_value")
+    eff_str  = f"{eff:.4f}"  if eff  is not None else "—"
+    pval_str = f"{pval:.4f}" if pval is not None else "—"
+
+    dr         = entry.get("date_range") or {}
+    date_start = dr.get("start", "unknown")
+    date_end   = dr.get("end",   "unknown")
+    n_bars     = entry.get("n_bars", 0)
+
+    return (
+        f"## {sym} {ivl} — {today} — {verdict}\n\n"
+        f"**Thesis:** {entry.get('thesis', '')}\n"
+        f"**Indicators:** {entry.get('indicators', '')}\n"
+        f"**Regime at test time:** {entry.get('regime') or chr(8212)}\n"
+        f"**Date range:** {date_start} → {date_end} ({n_bars} bars)\n\n"
+        f"| Metric           | Value      |\n"
+        f"|------------------|------------|\n"
+        f"| Trades           | {metrics.get('num_trades', chr(8212))} |\n"
+        f"| Total return     | {_fmt('total_return_pct', True)} |\n"
+        f"| CAGR             | {_fmt('cagr', True)} |\n"
+        f"| Sharpe           | {_fmt('sharpe_ratio')} |\n"
+        f"| Max DD           | {_fmt('max_drawdown_pct', True)} |\n"
+        f"| Profit Factor    | {_fmt('profit_factor')} |\n"
+        f"| Win Rate         | {_fmt('win_rate', True)} |\n"
+        f"| Expectancy       | {_fmt('expectancy')} |\n"
+        f"| Efficiency Ratio | {eff_str} |\n"
+        f"| p-value          | {pval_str} |\n\n"
+        f"**Verdict:** {verdict}\n"
+        f"**Failure reason:** {entry.get('failure_reason') or chr(8212)}\n"
+        f"**Iteration history:** {entry.get('iteration_history') or chr(8212)}\n"
+        f"**Notes:** {entry.get('notes') or chr(8212)}\n"
+    )
+
+
+def _render_md_from_jsonl() -> None:
+    entries = _load_jsonl()
+    parts = [_entry_to_md_body(e) for e in entries]
+    with open(_LOG_PATH, "w", encoding="utf-8") as fh:
+        fh.write("\n---\n".join(parts))
+
+
+_METRIC_MAP: Dict[str, str] = {
+    "Trades":        "num_trades",
+    "Total return":  "total_return_pct",
+    "CAGR":          "cagr",
+    "Sharpe":        "sharpe_ratio",
+    "Max DD":        "max_drawdown_pct",
+    "Profit Factor": "profit_factor",
+    "Win Rate":      "win_rate",
+    "Expectancy":    "expectancy",
+}
+
+
+def _parse_md_entry(raw: str) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {"source": "migrated"}
+
+    header = next((l for l in raw.splitlines() if l.startswith("## ")), None)
+    if not header:
+        entry["notes"] = "migrated, header unparseable"
+        return entry
+
+    parts = header[3:].split(" — ")
+    if len(parts) >= 3:
+        sym_ivl = parts[0].strip()
+        entry["date"]    = parts[1].strip()
+        entry["verdict"] = parts[2].strip()
+        sp = sym_ivl.rsplit(" ", 1)
+        entry["symbol"]   = sp[0] if len(sp) == 2 else sym_ivl
+        entry["interval"] = sp[1] if len(sp) == 2 else None
+    else:
+        entry["notes"] = "migrated, header unparseable"
+
+    def _grab(field: str) -> Optional[str]:
+        m = re.search(
+            rf'\*\*{re.escape(field)}:\*\*\s*(.*?)(?=\n\*\*|\n\||\Z)',
+            raw, re.DOTALL,
+        )
+        return m.group(1).strip() if m else None
+
+    entry["thesis"]            = _grab("Thesis")
+    entry["indicators"]        = _grab("Indicators")
+    entry["regime"]            = _grab("Regime at test time")
+    entry["failure_reason"]    = _grab("Failure reason")
+    entry["iteration_history"] = _grab("Iteration history")
+    entry["notes"]             = _grab("Notes") or entry.get("notes")
+
+    dr = re.search(r'\*\*Date range:\*\*\s*(\S+)\s*→\s*(\S+)\s*\((\d+)\s*bars\)', raw)
+    if dr:
+        entry["date_range"] = {"start": dr.group(1), "end": dr.group(2)}
+        entry["n_bars"]     = int(dr.group(3))
+
+    metrics: Dict[str, Any] = {}
+    for label, val_raw in re.findall(r'\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|', raw):
+        label   = label.strip()
+        val_raw = val_raw.strip().replace("%", "")
+        if label in _METRIC_MAP:
+            try:
+                fv = float(val_raw)
+                key = _METRIC_MAP[label]
+                metrics[key] = int(fv) if label == "Trades" else fv
+            except ValueError:
+                pass
+        elif label == "Efficiency Ratio":
+            try:
+                entry["efficiency_ratio"] = float(val_raw)
+            except ValueError:
+                pass
+        elif label == "p-value":
+            try:
+                entry["p_value"] = float(val_raw)
+            except ValueError:
+                pass
+    if metrics:
+        entry["metrics"] = metrics
+
+    return entry
+
+
+def _migrate_md_to_jsonl() -> None:
+    text = _LOG_PATH.read_text(encoding="utf-8")
+    for raw in [e.strip() for e in text.split("\n---\n") if e.strip()]:
+        _append_jsonl(_parse_md_entry(raw))
+
+
+if not _JSONL_PATH.exists() and _LOG_PATH.exists():
+    _migrate_md_to_jsonl()
 
 
 @mcp.tool()
@@ -831,7 +996,8 @@ def log_research_result(
     notes: str = "",
 ) -> Dict[str, Any]:
     """
-    Append a completed research cycle to RESEARCH_LOG.md.
+    Append a completed research cycle to RESEARCH_LOG.jsonl (source of truth)
+    and regenerate RESEARCH_LOG.md as a human-readable render.
 
     Call at the end of each full validation cycle (baseline → optimize →
     permutation test → verdict). Pulls current metrics from
@@ -851,14 +1017,14 @@ def log_research_result(
     iteration_history: What was changed and why, one line per step.
     notes            : Any additional notes.
     """
-    sym = symbol or _state.get("symbol") or "UNKNOWN"
-    ivl = interval or _state.get("interval") or "unknown"
+    sym   = symbol   or _state.get("symbol")   or "UNKNOWN"
+    ivl   = interval or _state.get("interval") or "unknown"
     today = date.today().isoformat()
 
     metrics = _state.get("last_metrics") or {}
     df = _state.get("df")
     if df is not None and len(df) > 0:
-        idx = df.index
+        idx        = df.index
         date_start = str(idx[0])[:10]
         date_end   = str(idx[-1])[:10]
         n_bars     = len(df)
@@ -866,47 +1032,32 @@ def log_research_result(
         date_start = date_end = "unknown"
         n_bars = 0
 
-    def _fmt(key: str, pct: bool = False) -> str:
-        v = metrics.get(key)
-        if v is None:
-            return "—"
-        return f"{v:.2f}%" if pct else f"{v:.4f}"
-
-    eff_str  = f"{efficiency_ratio:.4f}" if efficiency_ratio is not None else "—"
-    pval_str = f"{p_value:.4f}"          if p_value          is not None else "—"
-
-    entry = (
-        f"\n---\n"
-        f"## {sym} {ivl} — {today} — {verdict}\n\n"
-        f"**Thesis:** {thesis}\n"
-        f"**Indicators:** {indicators}\n"
-        f"**Regime at test time:** {regime or chr(8212)}\n"
-        f"**Date range:** {date_start} → {date_end} ({n_bars} bars)\n\n"
-        f"| Metric           | Value      |\n"
-        f"|------------------|------------|\n"
-        f"| Trades           | {metrics.get('num_trades', chr(8212))} |\n"
-        f"| Total return     | {_fmt('total_return_pct', True)} |\n"
-        f"| CAGR             | {_fmt('cagr', True)} |\n"
-        f"| Sharpe           | {_fmt('sharpe_ratio')} |\n"
-        f"| Max DD           | {_fmt('max_drawdown_pct', True)} |\n"
-        f"| Profit Factor    | {_fmt('profit_factor')} |\n"
-        f"| Win Rate         | {_fmt('win_rate', True)} |\n"
-        f"| Expectancy       | {_fmt('expectancy')} |\n"
-        f"| Efficiency Ratio | {eff_str} |\n"
-        f"| p-value          | {pval_str} |\n\n"
-        f"**Verdict:** {verdict}\n"
-        f"**Failure reason:** {failure_reason or chr(8212)}\n"
-        f"**Iteration history:** {iteration_history or chr(8212)}\n"
-        f"**Notes:** {notes or chr(8212)}\n"
-    )
+    entry: Dict[str, Any] = {
+        "symbol":            sym,
+        "interval":          ivl,
+        "date":              today,
+        "verdict":           verdict,
+        "thesis":            thesis,
+        "indicators":        indicators,
+        "regime":            regime or None,
+        "date_range":        {"start": date_start, "end": date_end},
+        "n_bars":            n_bars,
+        "metrics":           {k: v for k, v in metrics.items() if v is not None},
+        "efficiency_ratio":  efficiency_ratio,
+        "p_value":           p_value,
+        "failure_reason":    failure_reason or None,
+        "iteration_history": iteration_history or None,
+        "notes":             notes or None,
+        "source":            "mcp",
+    }
 
     try:
-        with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(entry)
+        _append_jsonl(entry)
+        _render_md_from_jsonl()
         return {
             "status": "ok",
             "logged": f"{sym} {ivl} — {today} — {verdict}",
-            "path":   str(_LOG_PATH),
+            "path":   str(_JSONL_PATH),
         }
     except Exception as exc:
         return {"error": str(exc)}
@@ -919,7 +1070,7 @@ def get_research_history(
     last_n: int = 20,
 ) -> Dict[str, Any]:
     """
-    Read and summarise RESEARCH_LOG.md.
+    Read and summarise the RESEARCH_LOG.jsonl store.
 
     Returns past research entries filtered by symbol and/or verdict.
     Call at session start before proposing a hypothesis — lets Claude avoid
@@ -931,46 +1082,28 @@ def get_research_history(
     verdict_filter: "VIABLE" | "MARGINAL" | "DISCARD" | None (return all).
     last_n        : Maximum entries to return, most recent first (default 20).
     """
-    if not _LOG_PATH.exists():
+    if not _JSONL_PATH.exists():
         return {"status": "ok", "entries": [], "total": 0,
                 "note": "No research log yet — this symbol has never been tested."}
 
     try:
-        text = _LOG_PATH.read_text(encoding="utf-8")
+        all_entries = _load_jsonl()
     except Exception as exc:
         return {"error": str(exc)}
 
-    raw_entries = [e.strip() for e in text.split("\n---\n") if e.strip()]
-
-    entries: List[Dict[str, Any]] = []
-    for raw in raw_entries:
-        lines = raw.splitlines()
-        header = next((l for l in lines if l.startswith("## ")), None)
-        if not header:
-            continue
-        parts = header[3:].split(" — ")
-        if len(parts) < 3:
-            continue
-        sym_ivl        = parts[0].strip()
-        entry_date     = parts[1].strip()
-        entry_verdict  = parts[2].strip()
-
+    filtered: List[Dict[str, Any]] = []
+    for e in all_entries:
+        sym_ivl = f"{e.get('symbol', '')} {e.get('interval', '')}".strip()
         if symbol and symbol.upper() not in sym_ivl.upper():
             continue
-        if verdict_filter and entry_verdict.upper() != verdict_filter.upper():
+        if verdict_filter and (e.get("verdict") or "").upper() != verdict_filter.upper():
             continue
+        filtered.append(e)
 
-        entries.append({
-            "symbol_interval": sym_ivl,
-            "date":            entry_date,
-            "verdict":         entry_verdict,
-            "raw":             raw,
-        })
+    filtered.reverse()
+    filtered = filtered[:last_n]
 
-    entries.reverse()           # most recent first
-    entries = entries[:last_n]
-
-    return {"status": "ok", "total": len(entries), "entries": entries}
+    return {"status": "ok", "total": len(filtered), "entries": filtered}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Indicator registry tools

@@ -23,6 +23,8 @@ from ui.tabs.montecarlo import render_montecarlo_tab
 from ui.tabs.calendar import render_calendar_tab
 from ui.tabs.heatmap import render_heatmap_tab
 from ui.tabs.multi_asset import render_multi_asset_tab
+from ui.tabs.settings import render_settings_tab
+from ui.advisor.panel import get_column_ratio, render_advisor_panel
 
 
 # ── 1. Page config ────────────────────────────────────────────────────────────
@@ -42,35 +44,45 @@ init_session_state()
 # ── 4. Sidebar ────────────────────────────────────────────────────────────────
 render_sidebar()
 
-# ── 5. Main content ───────────────────────────────────────────────────────────
-st.markdown("# 📊 Strategy Lab")
+# ── 5. Main content + advisor rail ────────────────────────────────────────────
+_main_col, _rail_col = st.columns(get_column_ratio())
 
-tabs = st.tabs([
-    "🔬 Backtest",
-    "🎯 Optimize",
-    "🎲 Monte Carlo",
-    "📅 Calendar",
-    "🔥 Heatmap",
-    "🌐 Multi-Asset",
-])
+with _main_col:
+    st.markdown("# 📊 Strategy Lab")
 
-with tabs[0]:
-    render_backtest_tab()
+    tabs = st.tabs([
+        "🔬 Backtest",
+        "🎯 Optimize",
+        "🎲 Monte Carlo",
+        "📅 Calendar",
+        "🔥 Heatmap",
+        "🌐 Multi-Asset",
+        "⚙️ Settings",
+    ])
 
-with tabs[1]:
-    render_optimize_tab()
+    with tabs[0]:
+        render_backtest_tab()
 
-with tabs[2]:
-    render_montecarlo_tab()
+    with tabs[1]:
+        render_optimize_tab()
 
-with tabs[3]:
-    render_calendar_tab()
+    with tabs[2]:
+        render_montecarlo_tab()
 
-with tabs[4]:
-    render_heatmap_tab()
+    with tabs[3]:
+        render_calendar_tab()
 
-with tabs[5]:
-    render_multi_asset_tab()
+    with tabs[4]:
+        render_heatmap_tab()
+
+    with tabs[5]:
+        render_multi_asset_tab()
+
+    with tabs[6]:
+        render_settings_tab()
+
+with _rail_col:
+    render_advisor_panel()
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────

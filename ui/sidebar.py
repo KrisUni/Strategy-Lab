@@ -150,6 +150,8 @@ def _render_data_section() -> None:
                     start_dt = end_dt - timedelta(days=days)
                     df = fetch_yfinance(symbol, str(start_dt.date()), str(end_dt.date()), interval)
                     st.session_state.df = df
+                    st.session_state.loaded_symbol = symbol
+                    st.session_state.loaded_interval = interval
                     if df.attrs.get('date_range_clamped'):
                         st.warning(
                             f"⚠️ Date range clamped: `{interval}` data is limited to "
@@ -161,6 +163,8 @@ def _render_data_section() -> None:
                 elif data_src == "Sample":
                     df = generate_sample_data(days=int(days), volatility=sample_vol, seed=42)
                     st.session_state.df = df
+                    st.session_state.loaded_symbol = None
+                    st.session_state.loaded_interval = None
                     st.success(f"✅ **{len(df):,} bars** synthetic · {df.attrs['actual_start']} → {df.attrs['actual_end']}")
 
                 else:  # CSV
@@ -174,6 +178,8 @@ def _render_data_section() -> None:
                         try:
                             df = load_csv(tmp_path)
                             st.session_state.df = df
+                            st.session_state.loaded_symbol = None
+                            st.session_state.loaded_interval = None
                             st.success(f"✅ **{len(df):,} bars** from CSV · "
                                        f"{str(df.index[0].date())} → {str(df.index[-1].date())}")
                         finally:

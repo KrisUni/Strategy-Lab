@@ -33,3 +33,6 @@ scipy>=1.11.0
 
 # Mcp server
 fastmcp
+
+# AI Advisor
+anthropic>=0.50.0
