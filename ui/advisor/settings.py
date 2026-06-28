@@ -37,8 +37,8 @@ def _load_disk_config() -> dict:
     return {}
 
 
-def _save_disk_config(api_key: str, model: str) -> None:
-    _CONFIG_PATH.write_text(json.dumps({"api_key": api_key, "model": model}))
+def _save_disk_config(api_key: str, model: str, base_url: str = "") -> None:
+    _CONFIG_PATH.write_text(json.dumps({"api_key": api_key, "model": model, "base_url": base_url}))
 
 
 def _delete_disk_config() -> None:
@@ -67,10 +67,12 @@ def init_advisor_state() -> None:
         st.session_state.advisor_api_key = disk.get("api_key", "")
         st.session_state.advisor_model = disk.get("model", "claude-sonnet-4-6")
         st.session_state.advisor_key_on_disk = bool(disk.get("api_key", ""))
+        st.session_state.advisor_base_url = disk.get("base_url", "")
 
     for k, v in [
         ("advisor_model", "claude-sonnet-4-6"),
         ("advisor_key_on_disk", False),
+        ("advisor_base_url", ""),
         ("advisor_claude_md_override", None),
         ("advisor_disclosure_ack", False),
     ]:
@@ -157,19 +159,19 @@ def render_settings_panel() -> None:
     # ── Privacy disclosure ────────────────────────────────────────────────────
     st.markdown("### Privacy Disclosure")
     st.info(
-        "**What gets sent to Anthropic**\n\n"
+        "**What gets sent to your AI provider**\n\n"
         "When the advisor is active, your current strategy parameters, backtest "
         "metrics, active indicator descriptions, and research-log summaries are "
-        "included in requests to the Anthropic API. No raw price data or "
+        "included in requests to your configured AI provider's API. No raw price data or "
         "personally identifiable information is transmitted.\n\n"
-        "Requests are processed under your Anthropic account's data-handling "
+        "Requests are processed under your API provider's data-handling "
         "policy. The API key never leaves your machine (session-only unless you "
         "opt in to disk storage below)."
     )
 
     ack = st.session_state.get("advisor_disclosure_ack", False)
     new_ack = st.checkbox(
-        "I understand that enabling the advisor sends strategy data to the Anthropic API.",
+        "I understand that enabling the advisor sends strategy data to my configured AI provider's API.",
         value=ack,
         key="_advisor_disclosure_cb",
     )
@@ -184,14 +186,14 @@ def render_settings_panel() -> None:
     # ── API Key ───────────────────────────────────────────────────────────────
     st.markdown("### API Key")
     st.caption(
-        "Your Anthropic API key. Held in session memory only unless you opt in "
+        "Your API key. Held in session memory only unless you opt in "
         "to disk storage. Leave blank to keep the existing key."
     )
 
     st.text_input(
-        "Anthropic API key",
+        "API key",
         type="password",
-        placeholder="sk-ant-…  (blank keeps existing key)",
+        placeholder="Your API key  (blank keeps existing key)",
         key="_advisor_key_input",
         label_visibility="collapsed",
     )
@@ -211,12 +213,15 @@ def render_settings_panel() -> None:
                 trimmed = st.session_state.get("_advisor_key_input", "").strip()
                 if trimmed:
                     st.session_state.advisor_api_key = trimmed
+                new_base_url = st.session_state.get("_advisor_base_url_input", "").strip()
+                st.session_state.advisor_base_url = new_base_url
                 persist = st.session_state.get("_advisor_persist_cb", False)
                 st.session_state.advisor_key_on_disk = persist
                 if persist and st.session_state.advisor_api_key:
                     _save_disk_config(
                         st.session_state.advisor_api_key,
                         st.session_state.get("advisor_model", "claude-sonnet-4-6"),
+                        st.session_state.get("advisor_base_url", ""),
                     )
                     st.success("Key saved to disk.")
                 elif persist and not st.session_state.advisor_api_key:
@@ -228,30 +233,69 @@ def render_settings_panel() -> None:
     with col2:
         if st.button("Clear key", key="_advisor_clear_key"):
             st.session_state.advisor_api_key = ""
+            st.session_state.advisor_base_url = ""
             st.session_state.advisor_key_on_disk = False
             _delete_disk_config()
             st.info("Key cleared.")
 
     st.divider()
 
+    # ── Provider Base URL ─────────────────────────────────────────────────────
+    st.markdown("### Provider Base URL")
+    st.caption(
+        "Leave blank to use Anthropic. Set to any OpenAI-compatible endpoint "
+        "(e.g. https://api.openai.com/v1, https://openrouter.ai/api/v1)."
+    )
+    st.text_input(
+        "Base URL",
+        value=st.session_state.get("advisor_base_url", ""),
+        placeholder="https://api.openai.com/v1  (blank = Anthropic)",
+        key="_advisor_base_url_input",
+        label_visibility="collapsed",
+    )
+
+    st.divider()
+
     # ── Model selector ────────────────────────────────────────────────────────
     st.markdown("### Model")
 
-    current_model = st.session_state.get("advisor_model", "claude-sonnet-4-6")
-    idx = _MODEL_IDS.index(current_model) if current_model in _MODEL_IDS else 0
+    if st.session_state.get("advisor_base_url", "").strip():
+        current_model = st.session_state.get("advisor_model", "")
+        new_model = st.text_input(
+            "Model name",
+            value=current_model,
+            placeholder="e.g. gpt-4o",
+            key="_advisor_model_text",
+            label_visibility="collapsed",
+        )
+        if new_model != current_model:
+            st.session_state.advisor_model = new_model
+            if st.session_state.get("advisor_key_on_disk") and is_advisor_enabled():
+                _save_disk_config(
+                    st.session_state.advisor_api_key,
+                    new_model,
+                    st.session_state.get("advisor_base_url", ""),
+                )
+    else:
+        current_model = st.session_state.get("advisor_model", "claude-sonnet-4-6")
+        idx = _MODEL_IDS.index(current_model) if current_model in _MODEL_IDS else 0
 
-    chosen_label = st.selectbox(
-        "Model",
-        options=_MODEL_LABELS,
-        index=idx,
-        key="_advisor_model_select",
-        label_visibility="collapsed",
-    )
-    chosen_model = _MODEL_IDS[_MODEL_LABELS.index(chosen_label)]
-    if chosen_model != st.session_state.get("advisor_model"):
-        st.session_state.advisor_model = chosen_model
-        if st.session_state.get("advisor_key_on_disk") and is_advisor_enabled():
-            _save_disk_config(st.session_state.advisor_api_key, chosen_model)
+        chosen_label = st.selectbox(
+            "Model",
+            options=_MODEL_LABELS,
+            index=idx,
+            key="_advisor_model_select",
+            label_visibility="collapsed",
+        )
+        chosen_model = _MODEL_IDS[_MODEL_LABELS.index(chosen_label)]
+        if chosen_model != st.session_state.get("advisor_model"):
+            st.session_state.advisor_model = chosen_model
+            if st.session_state.get("advisor_key_on_disk") and is_advisor_enabled():
+                _save_disk_config(
+                    st.session_state.advisor_api_key,
+                    chosen_model,
+                    st.session_state.get("advisor_base_url", ""),
+                )
 
     st.divider()
 

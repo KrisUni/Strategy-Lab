@@ -36,3 +36,4 @@ fastmcp
 
 # AI Advisor
 anthropic>=0.50.0
+openai>=1.0.0
