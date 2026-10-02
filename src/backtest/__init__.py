@@ -125,6 +125,8 @@ class BacktestEngine:
     - Stop orders (SL/TP/trailing/ATR): trigger on high/low, fill at
       order level OR bar open if the open gaps past the level (whichever
       is worse for the trader). This is how real stop-market orders work.
+      Trailing/ATR levels use extremes through the previous bar and the
+      previous bar's ATR.
     - Same-bar entry exits are optional. When enabled, stop-type exits are
       checked on the ENTRY bar itself (bar[i] after entering at bar[i]'s
       open). If the bar's range hits the stop, exit same bar.
@@ -288,15 +290,19 @@ class BacktestEngine:
                 return max(order_level, bar_open)
 
     def _check_stop_exits(self, position: Trade, row, p,
-                          highest_since_entry: float,
-                          lowest_since_entry: float,
+                          ref_high: float, ref_low: float,
                           bars_in_trade: int,
-                          df: pd.DataFrame) -> Tuple[Optional[float], Optional[str]]:
+                          prev_atr: Optional[float]) -> Tuple[Optional[float], Optional[str]]:
         """
         Check all stop-type exit conditions for a bar.
 
         This is factored out so it can be called BOTH on the entry bar
         (BUG 2 fix) and on subsequent bars without duplicating logic.
+
+        `ref_high`/`ref_low` are the price extremes since entry through the
+        PREVIOUS bar (or the entry price on the entry bar). `prev_atr` is ATR
+        of the previous bar. Stop levels must be computable at this bar's
+        open: no look-ahead.
 
         Returns:
             (exit_price, exit_reason) or (None, None) if no exit.
@@ -353,32 +359,32 @@ class BacktestEngine:
         if p.trailing_stop_enabled and exit_price is None:
             if position.direction == 'long':
                 activation = entry_price * (1 + p.trailing_stop_activation / 100)
-                if highest_since_entry >= activation:
-                    trail = highest_since_entry * (1 - p.trailing_stop_pct / 100)
+                if ref_high >= activation:
+                    trail = ref_high * (1 - p.trailing_stop_pct / 100)
                     if row['low'] <= trail:
                         exit_price = self._gap_aware_fill(
                             trail, bar_open, 'long', 'trail')
                         exit_reason = 'trailing_stop'
             else:
                 activation = entry_price * (1 - p.trailing_stop_activation / 100)
-                if lowest_since_entry <= activation:
-                    trail = lowest_since_entry * (1 + p.trailing_stop_pct / 100)
+                if ref_low <= activation:
+                    trail = ref_low * (1 + p.trailing_stop_pct / 100)
                     if row['high'] >= trail:
                         exit_price = self._gap_aware_fill(
                             trail, bar_open, 'short', 'trail')
                         exit_reason = 'trailing_stop'
 
         # ── ATR TRAILING ──
-        if p.atr_trailing_enabled and 'atr' in df.columns and exit_price is None:
-            atr_val = row['atr']
+        if p.atr_trailing_enabled and prev_atr is not None and not pd.isna(prev_atr) and exit_price is None:
+            atr_val = prev_atr
             if position.direction == 'long':
-                atr_stop = highest_since_entry - atr_val * p.atr_multiplier
+                atr_stop = ref_high - atr_val * p.atr_multiplier
                 if row['low'] <= atr_stop:
                     exit_price = self._gap_aware_fill(
                         atr_stop, bar_open, 'long', 'trail')
                     exit_reason = 'atr_trailing'
             else:
-                atr_stop = lowest_since_entry + atr_val * p.atr_multiplier
+                atr_stop = ref_low + atr_val * p.atr_multiplier
                 if row['high'] >= atr_stop:
                     exit_price = self._gap_aware_fill(
                         atr_stop, bar_open, 'short', 'trail')
@@ -419,6 +425,7 @@ class BacktestEngine:
             # Trading, equity and metrics start at trade_start.
             df = df.iloc[start_pos:]
 
+        has_atr = 'atr' in df.columns
         trades: List[Trade] = []
         cash = self.initial_capital
         position: Optional[Trade] = None
@@ -448,6 +455,7 @@ class BacktestEngine:
         for i in range(1, len(df)):
             row = df.iloc[i]
             prev_row = df.iloc[i - 1]
+            prev_atr = prev_row['atr'] if has_atr else None
             intrabar_exit = False  # Reset each bar
             exited_direction_this_bar = None
 
@@ -459,6 +467,9 @@ class BacktestEngine:
                 bars_in_market += 1
                 in_position_arr[i] = True
                 entry_price = position.entry_price
+
+                # Stop levels are resting orders: computed from extremes through bar i-1.
+                ref_high, ref_low = highest_since_entry, lowest_since_entry
 
                 # Track extremes for trailing stops and MAE/MFE
                 highest_since_entry = max(highest_since_entry, row['high'])
@@ -476,9 +487,7 @@ class BacktestEngine:
                 # with gap-through-aware fill prices.
                 # ─────────────────────────────────────────────────────────
                 exit_price, exit_reason = self._check_stop_exits(
-                    position, row, p,
-                    highest_since_entry, lowest_since_entry,
-                    bars_in_trade, df
+                    position, row, p, ref_high, ref_low, bars_in_trade, prev_atr
                 )
 
                 # ── TIME EXIT (BUG 3 FIX: execute at open, not close) ──
@@ -668,8 +677,8 @@ class BacktestEngine:
                     if p.allow_same_bar_exit:
                         entry_exit_price, entry_exit_reason = self._check_stop_exits(
                             position, row, p,
-                            highest_since_entry, lowest_since_entry,
-                            0, df  # bars_in_trade=0 on entry bar
+                            position.entry_price, position.entry_price,  # no extremes before the fill
+                            0, prev_atr,
                         )
 
                         if entry_exit_price is not None:

@@ -412,3 +412,17 @@ CONFIGS = [
         "spy_1d_2020_2024.parquet",
     ),
 ]
+
+# ATR trailing stop coverage: copy of pamrp_long_spy with the fixed SL swapped
+# for an ATR trailing exit.
+CONFIGS.append((
+    "pamrp_atr_trail_long_spy",
+    {
+        **next(c for c in CONFIGS if c[0] == "pamrp_long_spy")[1],
+        "stop_loss_enabled": False,
+        "atr_trailing_enabled": True,
+        "atr_length": 14,
+        "atr_multiplier": 2.0,
+    },
+    "spy_1d_2020_2024.parquet",
+))
