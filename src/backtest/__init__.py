@@ -13,6 +13,11 @@ from .metrics import cagr_pct, annualized_sharpe, annualized_sortino, calmar_rat
 DEFAULT_COMMISSION_PCT = 0.1
 DEFAULT_SLIPPAGE_PCT = 0.0
 
+# Kelly payoff fallbacks (percent), used when TP/SL are disabled and fewer than
+# KELLY_MIN_TRADES realized trades exist to estimate the payoff from.
+KELLY_FALLBACK_WIN_PCT = 5.0
+KELLY_FALLBACK_LOSS_PCT = 3.0
+
 
 @dataclass
 class Trade:
@@ -157,7 +162,8 @@ class BacktestEngine:
         win_rate: float = 0.5,
         realized_avg_win_pct: float = 0.0,
         realized_avg_loss_pct: float = 0.0,
-        realized_count: int = 0
+        realized_count: int = 0,
+        direction: str = 'long'
     ) -> float:
         """
         Calculate dollar amount to allocate to this trade.
@@ -167,6 +173,25 @@ class BacktestEngine:
         trades have accumulated (>= 20). Before that, falls back to
         parameter-based estimates. This prevents early over-sizing
         from inaccurate theoretical assumptions.
+
+        Kelly formula:
+            f* = (b * p - q) / b
+            b  = avg_win / avg_loss,  p = win_rate,  q = 1 - p
+        f* is clipped to [0, 1] and scaled by kelly_fraction.
+
+        Parameters:
+            available_capital: Cash available for the trade.
+            price: Entry price (unused by the sizing formula).
+            win_rate: Realized win rate p in [0, 1].
+            realized_avg_win_pct: Realized average win (percent).
+            realized_avg_loss_pct: Realized average loss (percent, positive).
+            realized_count: Number of realized trades behind the stats.
+            direction: 'long' or 'short'. Selects which side's TP/SL feed
+                the pre-20-trade fallback payoff estimate. The realized
+                branch pools both directions and ignores it.
+
+        Returns:
+            Dollar amount to allocate.
         """
         p = self.params
         KELLY_MIN_TRADES = 20
@@ -178,8 +203,12 @@ class BacktestEngine:
                 avg_loss = realized_avg_loss_pct
             else:
                 # Fallback to parameter estimates until enough data
-                avg_win = p.take_profit_pct_long if p.take_profit_enabled else 5.0
-                avg_loss = p.stop_loss_pct_long if p.stop_loss_enabled else 3.0
+                if direction == 'short':
+                    avg_win = p.take_profit_pct_short if p.take_profit_enabled else KELLY_FALLBACK_WIN_PCT
+                    avg_loss = p.stop_loss_pct_short if p.stop_loss_enabled else KELLY_FALLBACK_LOSS_PCT
+                else:
+                    avg_win = p.take_profit_pct_long if p.take_profit_enabled else KELLY_FALLBACK_WIN_PCT
+                    avg_loss = p.stop_loss_pct_long if p.stop_loss_enabled else KELLY_FALLBACK_LOSS_PCT
 
             b = avg_win / max(avg_loss, 0.01)
             q = 1.0 - win_rate
@@ -611,7 +640,8 @@ class BacktestEngine:
                     entry_price = row['open'] * (1 + self.slippage_pct / 100)
                     size_dollars = self._calculate_trade_size_dollars(
                         cash, entry_price, win_rate,
-                        realized_avg_win, realized_avg_loss, recent_total
+                        realized_avg_win, realized_avg_loss, recent_total,
+                        direction='long'
                     )
                     position = Trade(
                         entry_idx=i, entry_date=row.name,
@@ -624,7 +654,8 @@ class BacktestEngine:
                     entry_price = row['open'] * (1 - self.slippage_pct / 100)
                     size_dollars = self._calculate_trade_size_dollars(
                         cash, entry_price, win_rate,
-                        realized_avg_win, realized_avg_loss, recent_total
+                        realized_avg_win, realized_avg_loss, recent_total,
+                        direction='short'
                     )
                     position = Trade(
                         entry_idx=i, entry_date=row.name,

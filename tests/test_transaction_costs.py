@@ -90,3 +90,15 @@ def test_optimizer_passes_slippage_to_backtest_engine(monkeypatch):
     }
     assert result.commission_pct == pytest.approx(0.33)
     assert result.slippage_pct == pytest.approx(0.44)
+
+
+def test_kelly_fallback_uses_side_specific_tp_sl():
+    p = StrategyParams(use_kelly=True, kelly_fraction=0.5,
+                       take_profit_enabled=True, stop_loss_enabled=True,
+                       take_profit_pct_long=10.0, stop_loss_pct_long=5.0,
+                       take_profit_pct_short=2.0, stop_loss_pct_short=4.0)
+    eng = BacktestEngine(p)
+    assert eng._calculate_trade_size_dollars(
+        10_000, 100.0, 0.5, 0.0, 0.0, 0, direction='long') == pytest.approx(1250.0)
+    assert eng._calculate_trade_size_dollars(
+        10_000, 100.0, 0.5, 0.0, 0.0, 0, direction='short') == pytest.approx(0.0)
