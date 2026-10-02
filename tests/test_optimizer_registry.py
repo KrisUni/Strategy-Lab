@@ -19,7 +19,7 @@ optuna.logging.set_verbosity(optuna.logging.ERROR)
 from src.strategy import StrategyParams, TradeDirection
 from src.indicators.registry import INDICATOR_REGISTRY, build_defaults_from_registry
 from src.optimize import _count_active_params, _count_enabled_indicators, _is_entry_param
-from src.optimize import BayesianOptimizer
+from src.optimize import BayesianOptimizer, _efficiency_from_fold_scores
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -210,3 +210,26 @@ def test_different_seeds_produce_different_trials(minimal_df, pamrp_only_filters
         return study.trials[0].params
 
     assert first_trial_params(0) != first_trial_params(99)
+
+
+def test_efficiency_from_fold_scores_worked_example():
+    """Only folds with finite train AND test count: (2,1) and (3,1.5)."""
+    inf = float('-inf')
+    result = _efficiency_from_fold_scores([(2.0, 1.0), (inf, 0.5), (1.0, inf), (3.0, 1.5)])
+    assert result[:3] == pytest.approx((2.5, 1.25, 0.5))
+    assert result[3] == 2
+
+
+def test_efficiency_from_fold_scores_all_unscored():
+    """No fold with both scores finite → all zeros."""
+    result = _efficiency_from_fold_scores([(float('-inf'), 1.0)])
+    assert result == (0.0, 0.0, 0.0, 0)
+
+
+def test_efficiency_from_fold_scores_zero_train_average():
+    """avg_train == 0 → efficiency guarded to 0.0, folds still counted."""
+    avg_train, avg_oos, eff, n = _efficiency_from_fold_scores([(1.0, 0.5), (-1.0, 0.5)])
+    assert avg_train == pytest.approx(0.0)
+    assert avg_oos == pytest.approx(0.5)
+    assert eff == 0.0
+    assert n == 2

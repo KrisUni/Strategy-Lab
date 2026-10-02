@@ -479,6 +479,7 @@ def run_optimize(
             "train_value": _sf(result.train_value),
             "test_value": _sf(result.test_value),
             "efficiency_ratio": _sf(result.efficiency_ratio),
+            "n_folds_scored": result.n_folds_scored,
             "failed_trial_pct": _sf(result.failed_trial_pct),
             "warnings": result.warnings or [],
             "fold_results": fold_results,

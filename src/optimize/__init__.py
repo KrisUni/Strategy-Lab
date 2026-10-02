@@ -119,6 +119,8 @@ class OptimizationResult:
                           > 0.20 → investigate backtest engine.
     warnings            : Human-readable list of robustness warnings.
     window_type         : 'rolling', 'anchored', or 'simple' (informational).
+    n_folds_scored      : WFO folds with finite train AND test score; the folds
+                          averaged into efficiency_ratio, train_value, test_value.
     """
     best_params: Dict[str, Any]
     best_value: float
@@ -138,6 +140,7 @@ class OptimizationResult:
     warnings: List[str] = field(default_factory=list)
     window_type: str = 'rolling'
     pinned_params: Dict[str, Any] = field(default_factory=dict)   # v9: params fixed by user
+    n_folds_scored: int = 0   # WFO: folds with finite train AND test score (used in efficiency_ratio)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,6 +293,37 @@ def _compute_param_stability(
             cv_dict[k] = 0.0
 
     return cv_dict
+
+
+def _efficiency_from_fold_scores(
+    fold_scores: List[Tuple[float, float]],
+) -> Tuple[float, float, float, int]:
+    """
+    Walk-forward efficiency over folds where BOTH train and test scores are finite.
+
+    A score of -inf means the run had fewer than min_trades. Such folds carry
+    no information about IS→OOS transfer and are excluded from BOTH averages,
+    so numerator and denominator always describe the same folds.
+
+        avg_train  = mean(train_k)  for scored k
+        avg_oos    = mean(test_k)   for scored k
+        efficiency = avg_oos / avg_train   (0.0 if |avg_train| <= 1e-9 or no scored folds)
+
+    Parameters
+    ----------
+    fold_scores : list of (train_score, test_score) per fold; raw scores, may be -inf.
+
+    Returns
+    -------
+    (avg_train, avg_oos, efficiency, n_scored)
+    """
+    scored = [(tr, ts) for tr, ts in fold_scores if np.isfinite(tr) and np.isfinite(ts)]
+    if not scored:
+        return 0.0, 0.0, 0.0, 0
+    avg_train = float(np.mean([tr for tr, _ in scored]))
+    avg_oos = float(np.mean([ts for _, ts in scored]))
+    efficiency = avg_oos / avg_train if abs(avg_train) > 1e-9 else 0.0
+    return avg_train, avg_oos, efficiency, len(scored)
 
 
 def _build_robustness_warnings(
@@ -652,7 +686,7 @@ class BayesianOptimizer:
         trials_per_fold = max(50, n_trials // max(n_active_folds, 1))
 
         wf_folds: List[WalkForwardFold] = []
-        oos_scores: List[float] = []
+        fold_scores: List[Tuple[float, float]] = []
         all_failed_pcts: List[float] = []
 
         for k, (tr_start, tr_end, ts_start, ts_end) in enumerate(fold_windows, start=1):
@@ -699,9 +733,7 @@ class BayesianOptimizer:
                 best_params=fold_params,
                 oos_equity=test_res.equity_curve,   # v8: store only equity curve
             ))
-
-            if test_score > float('-inf'):
-                oos_scores.append(test_score)
+            fold_scores.append((train_score, test_score))
 
         if not wf_folds:
             logger.warning("Walk-forward produced no valid folds; falling back to simple split.")
@@ -714,12 +746,8 @@ class BayesianOptimizer:
         stitched_equity = _stitch_oos_equity(wf_folds, self.initial_capital)
 
         # Efficiency ratio — FIX #2 (v8): use abs() guard, allow negative
-        avg_oos = float(np.mean(oos_scores)) if oos_scores else 0.0
-        avg_train = float(np.mean([f.train_value for f in wf_folds])) if wf_folds else 0.0
-        if abs(avg_train) > 1e-9:
-            efficiency_ratio = avg_oos / avg_train
-        else:
-            efficiency_ratio = 0.0
+        avg_train, avg_oos, efficiency_ratio, n_scored = _efficiency_from_fold_scores(fold_scores)
+        n_unscored = len(wf_folds) - n_scored
 
         # Param stability — entry params only (v8)
         param_stability_cv = _compute_param_stability(wf_folds)
@@ -731,8 +759,14 @@ class BayesianOptimizer:
 
         all_warnings = _build_robustness_warnings(
             efficiency_ratio, param_stability_cv, avg_failed_pct,
-            budget_warnings, has_oos_data=bool(oos_scores),
+            budget_warnings, has_oos_data=n_scored > 0,
         )
+        if n_unscored > 0:
+            all_warnings.append(
+                f"{n_unscored} of {len(wf_folds)} walk-forward folds had fewer than "
+                f"{self.min_trades} trades in train or test and were excluded from the "
+                f"efficiency ratio and OOS average."
+            )
 
         final_dict = deployment_params.to_dict()
         final_dict['trade_direction_str'] = self.trade_direction_str
@@ -756,6 +790,7 @@ class BayesianOptimizer:
             warnings=all_warnings,
             window_type=self.window_type,
             pinned_params=self.pinned_params,
+            n_folds_scored=n_scored,
         )
 
     # ── Simple train/test split ───────────────────────────────────────────────
