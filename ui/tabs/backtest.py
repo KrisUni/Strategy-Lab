@@ -87,6 +87,11 @@ def render_backtest_tab() -> None:
         c4.metric("Expectancy", f"${r.expectancy:.2f}")
         c5.metric("Payoff", f"{r.payoff_ratio:.2f}")
         c6.metric("Mkt Time", f"{r.pct_time_in_market:.0f}%")
+        if r.open_trades_at_end:
+            st.caption(
+                f"{r.open_trades_at_end} position open at end of data was force-closed for the "
+                "equity curve and is excluded from trade statistics (it still appears in the trade log)."
+            )
         with st.expander("📊 Detailed Metrics", expanded=False):
             c1, c2, c3, c4, c5, c6 = st.columns(6)
             c1.metric("Avg Win", f"${r.avg_winner:.2f}")

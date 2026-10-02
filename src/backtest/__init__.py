@@ -43,6 +43,7 @@ class BacktestResults:
     total_return_pct: float = 0.0
     cagr: float = 0.0
     num_trades: int = 0
+    open_trades_at_end: int = 0   # positions force-closed at end of data (excluded from trade stats)
     winners: int = 0
     losers: int = 0
     win_rate: float = 0.0
@@ -734,10 +735,38 @@ class BacktestEngine:
         bars_per_year: int, bars_in_market: int, total_bars: int,
         in_position_arr: np.ndarray
     ) -> BacktestResults:
-        """Calculate all performance metrics."""
-        num_trades = len(trades)
+        """
+        Calculate all performance metrics.
 
-        if num_trades == 0:
+        ``end_of_data`` force-closes are an accounting artifact (no strategy
+        exit decision). They remain in ``trades`` and in the equity curve but
+        are excluded from every TRADE statistic (``closed`` list). EQUITY
+        statistics (return, CAGR, drawdown, Sharpe, Sortino, Calmar, time in
+        market) are always computed from the full equity curve.
+
+        Parameters:
+            trades: All trades, including any end_of_data force-close.
+            equity_curve: Mark-to-market equity per bar.
+            realized_equity: Realized-only equity per bar.
+            bars_per_year: Annualization factor (calendar bars per year).
+            bars_in_market: Number of bars with an open position.
+            total_bars: Total bars in the run.
+            in_position_arr: Boolean array, True where a position was held.
+
+        Returns:
+            BacktestResults. ``num_trades`` counts closed trades only;
+            ``open_trades_at_end`` counts excluded force-closes.
+            Win rate = winners / num_trades * 100;
+            profit factor = gross_profit / gross_loss (999.99 cap).
+        """
+        # end_of_data closes are an accounting artifact (no strategy exit decision).
+        # They stay in `trades` and in the equity curve, but are excluded from all
+        # TRADE statistics. EQUITY statistics use the full equity curve.
+        closed = [t for t in trades if t.exit_reason != 'end_of_data']
+        open_at_end = len(trades) - len(closed)
+        num_trades = len(closed)
+
+        if len(trades) == 0:
             return BacktestResults(
                 trades=trades,
                 equity_curve=equity_curve,
@@ -748,8 +777,8 @@ class BacktestEngine:
                 bars_per_year=bars_per_year,
             )
 
-        winners = [t for t in trades if t.pnl > 0]
-        losers = [t for t in trades if t.pnl <= 0]
+        winners = [t for t in closed if t.pnl > 0]
+        losers = [t for t in closed if t.pnl <= 0]
 
         total_return = equity_curve.iloc[-1] - self.initial_capital
         total_return_pct = (total_return / self.initial_capital) * 100
@@ -764,7 +793,7 @@ class BacktestEngine:
         else:
             cagr = 0.0
 
-        win_rate = len(winners) / num_trades * 100
+        win_rate = len(winners) / num_trades * 100 if num_trades else 0.0
 
         gross_profit = sum(t.pnl for t in winners) if winners else 0
         gross_loss = abs(sum(t.pnl for t in losers)) if losers else 0
@@ -781,15 +810,21 @@ class BacktestEngine:
         avg_loser = np.mean([t.pnl for t in losers]) if losers else 0
         avg_winner_pct = np.mean([t.pnl_pct for t in winners]) if winners else 0
         avg_loser_pct = np.mean([t.pnl_pct for t in losers]) if losers else 0
-        avg_trade = np.mean([t.pnl for t in trades])
-        avg_bars = np.mean([t.bars_held for t in trades])
+        avg_trade = np.mean([t.pnl for t in closed]) if closed else 0.0
+        avg_bars = np.mean([t.bars_held for t in closed]) if closed else 0.0
 
-        payoff_ratio = (avg_winner / abs(avg_loser)) if avg_loser != 0 else 999.99
-        payoff_ratio = min(payoff_ratio, 999.99)
+        if not closed:
+            payoff_ratio = 0.0
+        else:
+            payoff_ratio = (avg_winner / abs(avg_loser)) if avg_loser != 0 else 999.99
+            payoff_ratio = min(payoff_ratio, 999.99)
 
         # Expectancy = (win_rate * avg_win) - (loss_rate * |avg_loss|)
-        wr_frac = len(winners) / num_trades
-        expectancy = wr_frac * avg_winner - (1.0 - wr_frac) * abs(avg_loser)
+        if closed:
+            wr_frac = len(winners) / num_trades
+            expectancy = wr_frac * avg_winner - (1.0 - wr_frac) * abs(avg_loser)
+        else:
+            expectancy = 0.0
 
         # ── Drawdown ──
         peak = equity_curve.expanding().max()
@@ -849,7 +884,7 @@ class BacktestEngine:
         max_consec_win = 0
         cur_loss = 0
         cur_win = 0
-        for t in trades:
+        for t in closed:
             if t.pnl <= 0:
                 cur_loss += 1
                 cur_win = 0
@@ -859,8 +894,8 @@ class BacktestEngine:
                 cur_loss = 0
                 max_consec_win = max(max_consec_win, cur_win)
 
-        avg_mae = np.mean([t.mae for t in trades]) if trades else 0
-        avg_mfe = np.mean([t.mfe for t in trades]) if trades else 0
+        avg_mae = np.mean([t.mae for t in closed]) if closed else 0
+        avg_mfe = np.mean([t.mfe for t in closed]) if closed else 0
         pct_in_market = (bars_in_market / total_bars * 100) if total_bars > 0 else 0
 
         return BacktestResults(
@@ -871,6 +906,7 @@ class BacktestEngine:
             total_return_pct=total_return_pct,
             cagr=cagr,
             num_trades=num_trades,
+            open_trades_at_end=open_at_end,
             winners=len(winners),
             losers=len(losers),
             win_rate=win_rate,

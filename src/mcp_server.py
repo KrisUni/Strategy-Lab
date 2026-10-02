@@ -97,6 +97,7 @@ def _results_to_dict(r) -> Dict[str, Any]:
     """Serialize a BacktestResults dataclass to a plain dict."""
     return {
         "num_trades":             r.num_trades,
+        "open_trades_at_end":     r.open_trades_at_end,
         "total_return_pct":       _sf(r.total_return_pct),
         "cagr":                   _sf(r.cagr),
         "sharpe_ratio":           _sf(r.sharpe_ratio),
