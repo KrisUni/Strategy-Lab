@@ -7,6 +7,13 @@ Run once before the first regression test run:
 Uses yfinance for daily data. Config 3 (ETH-USD 1h) uses synthetic data
 because yfinance 1h history is limited to ~730 rolling calendar days
 and would produce a non-reproducible fixture.
+
+WARNING: Fixtures are committed and are the source of truth for
+expected_hashes.json. Re-running this script re-downloads yfinance data
+with auto_adjust=True; adjusted history is rewritten after every dividend
+or split, so regenerated fixtures will generally NOT reproduce the pinned
+hashes. Only regenerate deliberately, and re-pin hashes in the same commit
+with a note stating the change is data-only.
 """
 import sys
 from pathlib import Path
