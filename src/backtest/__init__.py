@@ -372,13 +372,38 @@ class BacktestEngine:
 
         return exit_price, exit_reason
 
-    def run(self, df: pd.DataFrame) -> BacktestResults:
-        """Run backtest with v8 fixes (gap-through, entry-bar SL, time-exit, Kelly)."""
+    def run(self, df: pd.DataFrame, trade_start: Optional[pd.Timestamp] = None) -> BacktestResults:
+        """
+        Run backtest with v8 fixes (gap-through, entry-bar SL, time-exit, Kelly).
+
+        Parameters
+        ----------
+        df : OHLCV DataFrame with a DatetimeIndex.
+        trade_start : optional timestamp. Signals/indicators are computed on the
+            full `df` (all bars are history/warmup); the simulation, equity curve and
+            metrics begin at the first bar >= trade_start. As with a fresh run, the
+            first simulated bar cannot open a position (entries use the previous
+            simulated bar's signal). None = simulate the whole df (legacy behavior).
+
+        Returns
+        -------
+        BacktestResults for the simulated bars.
+        """
         p = self.params
         bars_per_year = _estimate_bars_per_year(df)
 
         # Generate signals
         df = self.signal_gen.generate_all_signals(df)
+
+        if trade_start is not None:
+            if not df.index.is_monotonic_increasing:
+                raise ValueError("run(trade_start=...) requires a monotonic increasing index")
+            start_pos = int(df.index.searchsorted(pd.Timestamp(trade_start), side="left"))
+            if start_pos >= len(df):
+                raise ValueError(f"trade_start {trade_start} is after the last bar {df.index[-1]}")
+            # Signals were computed on the full history (indicator warmup).
+            # Trading, equity and metrics start at trade_start.
+            df = df.iloc[start_pos:]
 
         trades: List[Trade] = []
         cash = self.initial_capital

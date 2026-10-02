@@ -51,7 +51,7 @@ def test_optimizer_passes_slippage_to_backtest_engine(monkeypatch):
             captured['commission_pct'] = commission_pct
             captured['slippage_pct'] = slippage_pct
 
-        def run(self, df):
+        def run(self, df, trade_start=None):
             return BacktestResults(
                 trades=[],
                 equity_curve=pd.Series(dtype=float),

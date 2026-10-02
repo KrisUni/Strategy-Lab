@@ -422,14 +422,31 @@ class BayesianOptimizer:
 
     # ── Backtest helpers ──────────────────────────────────────────────────────
 
-    def _run_backtest(self, params: StrategyParams, df: pd.DataFrame) -> BacktestResults:
+    def _run_backtest(
+        self, params: StrategyParams, df: pd.DataFrame,
+        trade_start: Optional[pd.Timestamp] = None,
+    ) -> BacktestResults:
+        """
+        Backtest params on df.
+
+        Parameters
+        ----------
+        params : strategy parameters.
+        df : OHLCV data; all bars are indicator history.
+        trade_start : if given, simulation and metrics begin at this timestamp
+            (bars before it are indicator warmup only).
+
+        Returns
+        -------
+        BacktestResults.
+        """
         engine = BacktestEngine(
             params,
             self.initial_capital,
             commission_pct=self.commission_pct,
             slippage_pct=self.slippage_pct,
         )
-        return engine.run(df.copy())
+        return engine.run(df.copy(), trade_start=trade_start)
 
     def _get_metric(self, results: BacktestResults) -> float:
         if results.num_trades < self.min_trades:
@@ -509,11 +526,27 @@ class BayesianOptimizer:
 
     # ── Optuna study runner ───────────────────────────────────────────────────
 
-    def _make_objective(self, train_data: pd.DataFrame, exception_counter: list):
+    def _make_objective(
+        self, train_data: pd.DataFrame, exception_counter: list,
+        trade_start: Optional[pd.Timestamp] = None,
+    ):
+        """
+        Build the Optuna objective.
+
+        Parameters
+        ----------
+        train_data : data passed to each trial backtest (includes warmup history).
+        exception_counter : single-element list incremented on trial failure.
+        trade_start : forwarded to _run_backtest; trading starts here.
+
+        Returns
+        -------
+        Callable objective(trial) -> metric value (-inf on failure).
+        """
         def objective(trial):
             try:
                 params = self._build_params_from_trial(trial)
-                results = self._run_backtest(params, train_data)
+                results = self._run_backtest(params, train_data, trade_start=trade_start)
                 return self._get_metric(results)
             except Exception as exc:
                 exception_counter[0] += 1
@@ -528,9 +561,13 @@ class BayesianOptimizer:
         seed: int = 42,
         show_progress: bool = False,
         timeout: Optional[float] = None,
+        trade_start: Optional[pd.Timestamp] = None,
     ) -> Tuple[Optional[StrategyParams], float]:
         """
         Run an Optuna TPE study on train_data.
+
+        trade_start: if given, trial backtests simulate from this timestamp;
+        earlier bars of train_data serve as indicator warmup.
 
         Returns (best_params, failed_trial_pct).
         best_params is None if no valid trials found.
@@ -538,7 +575,7 @@ class BayesianOptimizer:
         exception_counter = [0]
         sampler = TPESampler(seed=seed)
         study = optuna.create_study(direction='maximize', sampler=sampler)
-        objective = self._make_objective(train_data, exception_counter)
+        objective = self._make_objective(train_data, exception_counter, trade_start=trade_start)
 
         with _suppress_warnings():
             study.optimize(
@@ -603,6 +640,9 @@ class BayesianOptimizer:
         4. Stitch per-fold OOS equity curves → stitched_equity.
         5. Compute efficiency ratio, param stability, and warnings.
 
+        Each backtest receives all bars before its window end as indicator
+        warmup; trades and metrics start at the window start.
+
         Per-fold trial budget: n_trials divided across folds, floor of 50.
         """
         budget_warnings = _build_trial_budget_warnings(n_trials, self.enabled_filters, self.pinned_params)
@@ -623,10 +663,17 @@ class BayesianOptimizer:
                 logger.debug("Fold %d skipped: insufficient data", k)
                 continue
 
+            # Indicator warmup: every backtest sees all bars BEFORE its window end;
+            # trading/metrics begin at the window start. Causal by construction.
+            train_hist = self.df.iloc[:tr_end]
+            test_hist = self.df.iloc[:ts_end]
+            train_from = self.df.index[tr_start]
+            test_from = self.df.index[ts_start]
+
             fold_seed = 42 + k * 7
             fold_params, failed_pct = self._optimize_on_data(
-                train_data, trials_per_fold, seed=fold_seed,
-                show_progress=show_progress, timeout=timeout,
+                train_hist, trials_per_fold, seed=fold_seed,
+                show_progress=show_progress, timeout=timeout, trade_start=train_from,
             )
             all_failed_pcts.append(failed_pct)
 
@@ -634,8 +681,8 @@ class BayesianOptimizer:
                 logger.debug("Fold %d: no valid trials", k)
                 continue
 
-            train_res = self._run_backtest(fold_params, train_data)
-            test_res = self._run_backtest(fold_params, test_data)
+            train_res = self._run_backtest(fold_params, train_hist, trade_start=train_from)
+            test_res = self._run_backtest(fold_params, test_hist, trade_start=test_from)
             train_score = self._get_metric(train_res)
             test_score = self._get_metric(test_res)
 
@@ -757,7 +804,7 @@ class BayesianOptimizer:
         params = self._build_params_from_trial(study.best_trial)
 
         train_res = self._run_backtest(params, self.train_df)
-        test_res = self._run_backtest(params, self.test_df)
+        test_res = self._run_backtest(params, self.df, trade_start=self.test_df.index[0])
         full_res = self._run_backtest(params, self.df)
 
         train_val = self._get_metric(train_res)
