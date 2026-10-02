@@ -178,7 +178,12 @@ def _render_permutation_results(perm) -> None:
     c1.metric(f"Real {perm.metric_name}", f"{perm.real_metric:.3f}")
     c2.metric("Median Permuted", f"{np.median(perm.permuted_metrics):.3f}")
     c3.metric("p-value", f"{perm.p_value:.3f}")
-    c4.metric("Permutations", perm.n_permutations)
+    c4.metric("Permutations", f"{perm.n_valid}/{perm.n_permutations}")
+    if perm.n_failed:
+        st.warning(
+            f"{perm.n_failed} of {perm.n_permutations} permutations failed and were excluded "
+            f"from the null distribution. First error: {perm.first_error}"
+        )
 
     # Interpretation
     if perm.p_value < 0.01:

@@ -121,3 +121,45 @@ def test_nonpositive_raises():
     df.iloc[5, df.columns.get_loc("low")] = -1.0
     with pytest.raises(ValueError):
         _permute_prices(df, np.random.default_rng(0))
+
+
+# ── p-value estimator and failure accounting ─────────────────────────────────
+from types import SimpleNamespace
+
+
+def _fake_optimizer(values):
+    """values[0] = real metric; then one entry per permutation; an Exception instance means raise."""
+    it = iter(values)
+    def fake(**kwargs):
+        v = next(it)
+        if isinstance(v, Exception):
+            raise v
+        return SimpleNamespace(full_data_results=SimpleNamespace(
+            profit_factor=v, equity_curve=pd.Series([1e4, 1e4]), num_trades=10))
+    return fake
+
+
+def _run_perm(monkeypatch, values, n_permutations):
+    from src.permutation import run_permutation_test
+    monkeypatch.setattr("src.optimize.optimize_strategy", _fake_optimizer(values))
+    return run_permutation_test(
+        _make_ohlcv(n=120), {}, n_permutations=n_permutations, n_trials=1,
+    )
+
+
+def test_pvalue_plus_one_and_failures_excluded(monkeypatch):
+    res = _run_perm(monkeypatch, [2.0, 1.0, 3.0, ValueError("boom"), 1.5, 2.0], 5)
+    assert res.n_valid == 4 and res.n_failed == 1
+    assert "boom" in res.first_error
+    assert res.p_value == pytest.approx(3 / 5)  # count_ge = 2 -> (2+1)/(4+1)
+    assert len(res.permuted_equities) == len(res.permuted_metrics) == 4
+
+
+def test_pvalue_never_zero(monkeypatch):
+    res = _run_perm(monkeypatch, [10.0, 1.0, 1.0, 1.0], 3)
+    assert res.p_value == pytest.approx(1 / 4)
+
+
+def test_all_permutations_failed_raises(monkeypatch):
+    with pytest.raises(RuntimeError, match="All 2 permutations failed"):
+        _run_perm(monkeypatch, [1.0, RuntimeError("x"), RuntimeError("y")], 2)

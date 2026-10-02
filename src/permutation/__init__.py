@@ -13,7 +13,9 @@ Procedure:
    b. Reconstruct synthetic prices from shuffled returns.
    c. Run the SAME optimizer on synthetic data.
    d. Record the best metric found.
-3. p-value = (# permuted metrics >= real metric) / N.
+3. p-value = (# valid permuted metrics >= real metric + 1) / (# valid permutations + 1).
+   Permutations whose optimization raises are excluded from the null
+   distribution and reported (n_failed, first_error).
 
 If p < 0.05, we reject the null — the strategy's edge is unlikely due to chance.
 """
@@ -39,13 +41,16 @@ class PermutationResult:
     permuted_equities: List[np.ndarray]  # list of equity curves
 
     # Statistical inference
-    p_value: float                   # (count >= real) / n_permutations
+    p_value: float                   # (count_ge + 1) / (n_valid + 1)
     n_permutations: int
     metric_name: str
 
     # For display
     real_num_trades: int = 0
     avg_permuted_trades: float = 0.0
+    n_valid: int = 0                 # permutations that completed (used for p-value)
+    n_failed: int = 0                # permutations whose optimization raised
+    first_error: Optional[str] = None  # repr of the first failure, for diagnosis
 
 
 def _permute_prices(df: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
@@ -183,9 +188,11 @@ def run_permutation_test(
     real_num_trades = real_result.full_data_results.num_trades
 
     # ── Step 2: Permutation loop ──────────────────────────────────────────
-    permuted_metrics = np.zeros(n_permutations)
+    valid_metrics: List[float] = []
     permuted_equities = []
     permuted_trade_counts = []
+    n_failed = 0
+    first_error: Optional[str] = None
 
     for i in range(n_permutations):
         if progress_callback:
@@ -215,22 +222,28 @@ def run_permutation_test(
             if perm_metric is None or np.isnan(perm_metric):
                 perm_metric = 0.0
 
-            permuted_metrics[i] = perm_metric
-
             perm_eq = perm_result.full_data_results.equity_curve.values \
                 if perm_result.full_data_results.equity_curve is not None \
                 else np.array([initial_capital])
+            valid_metrics.append(float(perm_metric))
             permuted_equities.append(perm_eq)
             permuted_trade_counts.append(perm_result.full_data_results.num_trades)
 
-        except Exception:
-            permuted_metrics[i] = 0.0
-            permuted_equities.append(np.array([initial_capital, initial_capital]))
-            permuted_trade_counts.append(0)
+        except Exception as exc:
+            n_failed += 1
+            if first_error is None:
+                first_error = repr(exc)
 
     # ── Step 3: Compute p-value ───────────────────────────────────────────
-    count_ge = np.sum(permuted_metrics >= real_metric_val)
-    p_value = count_ge / n_permutations
+    n_valid = len(valid_metrics)
+    if n_valid == 0:
+        raise RuntimeError(
+            f"All {n_permutations} permutations failed; first error: {first_error}"
+        )
+    permuted_metrics = np.asarray(valid_metrics, dtype=float)
+    count_ge = int(np.sum(permuted_metrics >= real_metric_val))
+    # Phipson & Smyth (2010): the observed statistic is one draw under H0.
+    p_value = (count_ge + 1) / (n_valid + 1)
 
     avg_perm_trades = float(np.mean(permuted_trade_counts)) if permuted_trade_counts else 0.0
 
@@ -244,4 +257,7 @@ def run_permutation_test(
         metric_name=metric,
         real_num_trades=real_num_trades,
         avg_permuted_trades=avg_perm_trades,
+        n_valid=n_valid,
+        n_failed=n_failed,
+        first_error=first_error,
     )
