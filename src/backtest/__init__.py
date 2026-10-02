@@ -72,34 +72,46 @@ class BacktestResults:
     bars_per_year: int = 252
 
 
+_SECONDS_PER_DAY = 86_400
+
+
 def _estimate_bars_per_year(df: pd.DataFrame) -> int:
     """
-    Estimate annualization factor from data frequency.
-    Uses median time delta between bars to infer frequency.
+    Estimate the annualization factor (bars per year) from the bar calendar.
+
+    trading_days_per_year = 365 if any bar falls on Sat/Sun (24/7 market) else 252
+    median_spacing        = median(diff(index))
+
+    intraday (spacing < 12h):  trading_days_per_year * median(bars per calendar date)
+    daily    (spacing <= 3d):  trading_days_per_year
+    weekly   (spacing <= 10d): 52
+    otherwise (monthly+):      12
+
+    Using the empirical bars-per-date count makes the result correct for
+    session markets (e.g. 1h US equities -> 7 bars/day -> 1764) and for
+    24/7 markets (1h crypto -> 24 bars/day -> 8760) without frequency buckets.
+
+    Raises
+    ------
+    TypeError if the index is not a DatetimeIndex (and len(df) >= 2).
     """
     if len(df) < 2:
         return 252
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise TypeError("_estimate_bars_per_year requires a DatetimeIndex")
 
-    deltas = pd.Series(df.index).diff().dropna()
-    median_delta = deltas.median()
-    seconds = median_delta.total_seconds()
+    idx = df.index
+    median_seconds = pd.Series(idx).diff().dropna().median().total_seconds()
+    trading_days_per_year = 365 if (idx.dayofweek >= 5).any() else 252
 
-    if seconds <= 120:       # ~1-2 min
-        return 252 * 390
-    elif seconds <= 600:     # ~5 min
-        return 252 * 78
-    elif seconds <= 1800:    # ~15 min
-        return 252 * 26
-    elif seconds <= 3600:    # ~30 min
-        return 252 * 13
-    elif seconds <= 7200:    # ~1 hour
-        return 252 * 7
-    elif seconds <= 172800:  # ~1 day
-        return 252
-    elif seconds <= 864000:  # ~1 week
+    if median_seconds < 0.5 * _SECONDS_PER_DAY:
+        bars_per_day = int(round(pd.Series(idx.normalize()).value_counts().median()))
+        return trading_days_per_year * max(bars_per_day, 1)
+    if median_seconds <= 3 * _SECONDS_PER_DAY:
+        return trading_days_per_year
+    if median_seconds <= 10 * _SECONDS_PER_DAY:
         return 52
-    else:
-        return 12
+    return 12
 
 
 class BacktestEngine:
