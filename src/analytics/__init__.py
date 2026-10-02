@@ -26,6 +26,8 @@ import pandas as pd
 from dataclasses import dataclass, field
 from scipy import stats as scipy_stats
 
+from src.backtest.metrics import annualized_sortino
+
 logger = logging.getLogger(__name__)
 
 DAY_NAMES     = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -199,10 +201,20 @@ def _wilson_ci(k: int, n: int, z: float = 1.96) -> Tuple[float, float]:
     return max(0.0, (center - margin) * 100), min(100.0, (center + margin) * 100)
 
 
-def _sortino(mean: float, day_rets: pd.Series, tpy: int) -> float:
-    downside = day_rets[day_rets < 0]
-    ds_std = float(downside.std()) if len(downside) > 1 else 0.0
-    return round((mean / ds_std) * np.sqrt(tpy), 3) if ds_std > 1e-9 else 0.0
+def _sortino(rets: pd.Series, tpy: int) -> float:
+    """
+    Annualized Sortino ratio, rounded to 3 decimals.
+
+        Sortino = mean(r) / sqrt(mean(min(r, 0)^2)) * sqrt(tpy)
+
+    Parameters:
+        rets: Per-period returns.
+        tpy: Periods per year.
+
+    Returns:
+        Sortino ratio (see annualized_sortino for edge cases).
+    """
+    return round(annualized_sortino(rets, tpy), 3)
 
 
 def _day_stats_row(day_rets: pd.Series, tpy: int) -> dict:
@@ -216,7 +228,7 @@ def _day_stats_row(day_rets: pd.Series, tpy: int) -> dict:
     win_rate = n_pos / n * 100
     ci_low, ci_high = _wilson_ci(n_pos, n)
     sharpe = round((mean / std) * np.sqrt(tpy), 3) if std > 1e-9 else 0.0
-    sortino = _sortino(mean, day_rets, tpy)
+    sortino = _sortino(day_rets, tpy)
     if n > 1:
         t_stat, p_value = scipy_stats.ttest_1samp(day_rets.values, 0.0)
     else:
@@ -470,7 +482,7 @@ def compute_yearly_stats(df: pd.DataFrame, tpy: int = 252) -> pd.DataFrame:
         cum = (1 + y_rets / 100).cumprod()
         mdd = float(((cum - cum.cummax()) / cum.cummax()).min() * 100)
         sharpe = round((mean / std) * np.sqrt(tpy), 3) if std > 1e-9 else 0.0
-        sortino = _sortino(mean, y_rets, tpy)
+        sortino = _sortino(y_rets, tpy)
         ci_low, ci_high = _wilson_ci(n_pos, len(y_rets))
         rows.append({
             'Year':             y,

@@ -8,6 +8,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 from ..strategy import StrategyParams, SignalGenerator, EntryConflictMode, EntryExitConflictMode
+from .metrics import cagr_pct, annualized_sharpe, annualized_sortino, calmar_ratio
 
 DEFAULT_COMMISSION_PCT = 0.1
 DEFAULT_SLIPPAGE_PCT = 0.0
@@ -627,6 +628,11 @@ class BacktestEngine:
                     cash -= position.size_dollars
                     highest_since_entry = row['high']
                     lowest_since_entry = row['low']
+                    # The entry bar carries P&L (open -> close after entering at the open),
+                    # so it is an in-market bar for exposure and risk-adjusted metrics.
+                    if not in_position_arr[i]:
+                        in_position_arr[i] = True
+                        bars_in_market += 1
 
                     # Snapshot arm-blocked exits for DEFER mode.
                     if p.entry_exit_conflict_mode == EntryExitConflictMode.DEFER:
@@ -783,15 +789,11 @@ class BacktestEngine:
         total_return = equity_curve.iloc[-1] - self.initial_capital
         total_return_pct = (total_return / self.initial_capital) * 100
 
-        # ── CAGR = (final/initial)^(bars_per_year / n_bars) - 1 ──
-        n_bars = len(equity_curve)
-        if n_bars > 1 and equity_curve.iloc[-1] > 0:
-            cagr = (equity_curve.iloc[-1] / self.initial_capital) ** (
-                bars_per_year / n_bars
-            ) - 1
-            cagr *= 100
-        else:
-            cagr = 0.0
+        # ── CAGR = (final/initial)^(bars_per_year / (n_points - 1)) - 1; ruin = -100% ──
+        cagr = cagr_pct(
+            self.initial_capital, float(equity_curve.iloc[-1]),
+            len(equity_curve), bars_per_year,
+        )
 
         win_rate = len(winners) / num_trades * 100 if num_trades else 0.0
 
@@ -865,19 +867,15 @@ class BacktestEngine:
         else:
             active_bars_per_year = bars_per_year
 
-        if n_active > 1 and active_returns.std() > 0:
-            sharpe = (active_returns.mean() / active_returns.std()) * np.sqrt(active_bars_per_year)
-        else:
-            sharpe = 0.0
+        # Sharpe = mean(r) / std(r, ddof=1) * sqrt(active_bars_per_year)
+        sharpe = annualized_sharpe(active_returns, active_bars_per_year)
 
-        neg_active = active_returns[active_returns < 0]
-        if len(neg_active) > 1 and neg_active.std() > 0:
-            sortino = (active_returns.mean() / neg_active.std()) * np.sqrt(active_bars_per_year)
-        else:
-            sortino = sharpe
+        # Sortino = mean(r) / sqrt(mean(min(r, 0)^2)) * sqrt(active_bars_per_year)
+        # (downside deviation over all active observations)
+        sortino = annualized_sortino(active_returns, active_bars_per_year)
 
-        # ── Calmar = CAGR / |Max DD %| ──
-        calmar = abs(cagr / max_drawdown_pct) if max_drawdown_pct != 0 else 0.0
+        # ── Calmar = CAGR% / |Max DD %| (sign follows CAGR) ──
+        calmar = calmar_ratio(cagr, max_drawdown_pct)
 
         # ── Consecutive wins/losses ──
         max_consec_loss = 0

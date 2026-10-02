@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from src.backtest import BacktestEngine
+from src.backtest.metrics import cagr_pct, annualized_sharpe
 from src.indicators import hpdr_bands
 from src.strategy import SignalGenerator
 from ui.helpers import params_to_strategy, calculate_beta_alpha
@@ -202,10 +203,7 @@ def _calculate_curve_stats(curve: pd.Series, bars_per_year: int) -> dict[str, fl
         total_return_pct = 0.0
 
     n_bars = len(curve)
-    if n_bars > 1 and start_val > 0 and end_val > 0:
-        cagr = ((end_val / start_val) ** (bars_per_year / n_bars) - 1.0) * 100
-    else:
-        cagr = 0.0
+    cagr = cagr_pct(start_val, end_val, n_bars, bars_per_year)
 
     peak = curve.expanding().max()
     max_dd_pct = float(((curve - peak) / peak).min() * 100) if peak.max() > 0 else 0.0
@@ -220,10 +218,7 @@ def _calculate_curve_stats(curve: pd.Series, bars_per_year: int) -> dict[str, fl
     else:
         active_bars_per_year = bars_per_year
 
-    if n_active > 1 and active_returns.std() > 0:
-        sharpe = float((active_returns.mean() / active_returns.std()) * np.sqrt(active_bars_per_year))
-    else:
-        sharpe = 0.0
+    sharpe = annualized_sharpe(active_returns, active_bars_per_year)
 
     return {
         'return_pct': float(total_return_pct),
