@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.montecarlo import run_monte_carlo
+from src.strategy import strategy_level_settings
 from ui.charts import (
     create_mc_confidence_chart,
     create_mc_histogram,
@@ -129,6 +130,8 @@ def render_montecarlo_tab() -> None:
                 for pk in pinned_set:
                     if pk in p:
                         pinned[pk] = p[pk]
+            for k, v in strategy_level_settings(p).items():
+                pinned.setdefault(k, v)
 
             progress_bar = st.progress(0, text="Optimizing on real data...")
 
@@ -150,7 +153,7 @@ def render_montecarlo_tab() -> None:
                     trade_direction=perm_dir,
                     train_pct=0.7,
                     progress_callback=_progress,
-                    pinned_params=pinned if pinned else None,
+                    pinned_params=pinned,
                 )
 
             progress_bar.empty()

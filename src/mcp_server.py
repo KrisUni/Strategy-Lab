@@ -52,6 +52,7 @@ from src.indicators.registry import (
     validate_registry as _validate_registry, _PROVISIONAL_KEYS,
 )
 from src.optimize import optimize_strategy
+from src.strategy import strategy_level_settings
 from src.permutation import run_permutation_test as _run_permutation_test
 from ui.helpers import params_to_strategy
 
@@ -452,6 +453,7 @@ def run_optimize(
             n_folds=n_folds,
             window_type=window_type,
             show_progress=False,
+            pinned_params=strategy_level_settings(_state["params"]) or None,
         )
 
         # Write best params back to state so run_backtest() uses them immediately
@@ -533,6 +535,7 @@ def run_permutation_test(
             initial_capital=_state["capital"],
             commission_pct=_state["commission"],
             slippage_pct=_state["slippage"],
+            pinned_params=strategy_level_settings(_state["params"]) or None,
         )
 
         if result is None:

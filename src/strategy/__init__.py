@@ -20,7 +20,7 @@ Changes from previous version
 
 import warnings
 import pandas as pd
-from typing import Dict, Any, Iterable
+from typing import Dict, Any, Iterable, Mapping
 from enum import Enum
 
 from ..indicators.registry import (
@@ -64,6 +64,29 @@ _STRATEGY_LEVEL_DEFAULTS: Dict[str, Any] = {
     "use_kelly":              False,
     "kelly_fraction":         0.5,
 }
+
+# Strategy-level settings that are NOT indicator params and are never optimized.
+# trade_direction is excluded: the optimizer receives it as an explicit argument.
+STRATEGY_LEVEL_KEYS: tuple = tuple(k for k in _STRATEGY_LEVEL_DEFAULTS if k != "trade_direction")
+
+
+def strategy_level_settings(params: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Extract strategy-level (non-indicator) settings from a flat params dict.
+
+    Used by every optimization caller so that optimization, permutation
+    testing and backtesting all run the SAME strategy configuration.
+    Keys absent from `params` are omitted (StrategyParams supplies defaults).
+
+    Parameters
+    ----------
+    params : flat params mapping (UI session params, MCP state, or StrategyParams.to_dict()).
+
+    Returns
+    -------
+    dict containing only the keys in STRATEGY_LEVEL_KEYS that are present in `params`.
+    """
+    return {k: params[k] for k in STRATEGY_LEVEL_KEYS if k in params}
 
 _DIRECTION_MAP: Dict[str, TradeDirection] = {
     "Long Only":  TradeDirection.LONG_ONLY,

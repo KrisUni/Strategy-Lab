@@ -22,7 +22,7 @@ try:
 except ImportError:
     raise ImportError("Install optuna: pip install optuna")
 
-from ..strategy import StrategyParams, TradeDirection, ConditionOperator, EntryConflictMode
+from ..strategy import StrategyParams, TradeDirection, ConditionOperator, EntryConflictMode, STRATEGY_LEVEL_KEYS
 from ..indicators.registry import INDICATOR_REGISTRY
 from ..indicators import specs as _indicator_specs  # noqa: F401 — triggers registration
 from ..backtest import (
@@ -152,25 +152,37 @@ def _count_active_params(
     """
     Count parameters that will be optimized via Optuna for the given config.
     Derived from the registry — no hardcoded dim counts needed.
-    Pinned params are subtracted; direction-only params are skipped when
-    the trade direction makes them irrelevant.
+    Pinned params are subtracted only when they name a parameter that would
+    otherwise be optimized (non-optimizable pins, e.g. strategy-level
+    settings, do not change the count); direction-only params are skipped
+    when the trade direction makes them irrelevant.
+
+    Parameters
+    ----------
+    enabled_filters : mapping of `<indicator>_enabled` flags to bool.
+    pinned_params   : optional mapping of pinned param names to values.
+    trade_direction : direction the optimization runs under.
+
+    Returns
+    -------
+    Number of free Optuna dimensions, floored at 1.
     """
     long_or_both  = trade_direction in (TradeDirection.LONG_ONLY,  TradeDirection.BOTH)
     short_or_both = trade_direction in (TradeDirection.SHORT_ONLY, TradeDirection.BOTH)
-    total = 0
+    active_names: set = set()
     for spec in INDICATOR_REGISTRY:
         if not enabled_filters.get(spec.enable_param, False):
             continue
         for p in spec.params:
             if not p.optimize:
                 continue
-            if p.direction == "long"  and not long_or_both:
+            if p.direction == "long" and not long_or_both:
                 continue
             if p.direction == "short" and not short_or_both:
                 continue
-            total += 1
-    n_pinned = len(pinned_params) if pinned_params else 0
-    return max(total - n_pinned, 1)
+            active_names.add(p.name)
+    pinned_names = set(pinned_params) if pinned_params else set()
+    return max(len(active_names - pinned_names), 1)
 
 
 def _count_enabled_indicators(enabled_filters: Dict[str, bool]) -> int:
@@ -480,8 +492,7 @@ class BayesianOptimizer:
 
         # Strategy-level params: always from pinned or class defaults (not registry)
         params_dict["trade_direction"] = self.trade_direction
-        for name in ("entry_operator", "exit_operator", "allow_same_bar_exit",
-                     "allow_same_bar_reversal", "entry_conflict_mode"):
+        for name in STRATEGY_LEVEL_KEYS:
             if name in pp:
                 params_dict[name] = pp[name]
 

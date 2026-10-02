@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from src.optimize import optimize_strategy
-from src.strategy import TradeDirection
+from src.strategy import TradeDirection, strategy_level_settings
 from src.indicators.registry import INDICATOR_REGISTRY
 from ui.helpers import get_active_filters_display, apply_best_params_callback
 from ui.state_migration import migrate_legacy_pamrp_pins
@@ -88,11 +88,8 @@ def render_optimize_tab() -> None:
             pinned_dict = {k: st.session_state.params[k]
                            for k in normalized_pins
                            if k in st.session_state.params}
-            pinned_dict.setdefault('entry_operator', st.session_state.params.get('entry_operator', 'and'))
-            pinned_dict.setdefault('exit_operator', st.session_state.params.get('exit_operator', 'or'))
-            pinned_dict.setdefault('allow_same_bar_exit', st.session_state.params.get('allow_same_bar_exit', True))
-            pinned_dict.setdefault('allow_same_bar_reversal', st.session_state.params.get('allow_same_bar_reversal', False))
-            pinned_dict.setdefault('entry_conflict_mode', st.session_state.params.get('entry_conflict_mode', 'skip'))
+            for k, v in strategy_level_settings(st.session_state.params).items():
+                pinned_dict.setdefault(k, v)
             with st.spinner("Optimizing..."):
                 res = optimize_strategy(
                     df=st.session_state.df.copy(), enabled_filters=ef,
